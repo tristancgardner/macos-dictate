@@ -2,7 +2,7 @@
 
 For years, many users have struggled with the inconsistent performance of macOS's built-in dictation feature. This tool aims to solve that problem by providing a reliable, customizable, and powerful alternative using OpenAI's Whisper model for speech-to-text transcription.
 
-![macOS Dictation Tool Header](./header_image.png)
+![macOS Dictation Tool Header](./header_image.webp)
 
 A macOS dictation tool that uses OpenAI's Whisper model for speech-to-text transcription. This tool allows you to dictate text using your microphone and have it transcribed and pasted into the active application on your Mac.
 
