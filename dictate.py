@@ -31,33 +31,6 @@ recording = False
 transcribing = False
 indicator_window = None
 
-# Function to show the red dot indicator
-def show_indicator():
-    def _show():
-        global indicator_window
-        indicator_window = tk.Tk()
-        indicator_window.overrideredirect(True)  # Remove window decorations
-        indicator_window.attributes("-topmost", True)
-        indicator_window.attributes("-transparent", True)
-        indicator_window.configure(bg='red')
-        screen_width = indicator_window.winfo_screenwidth()
-        size = 20  # Size of the red dot
-        x = screen_width - size - 10
-        y = 10
-        indicator_window.geometry(f"{size}x{size}+{x}+{y}")
-        canvas = tk.Canvas(indicator_window, width=size, height=size, bg='red', highlightthickness=0)
-        canvas.pack()
-        canvas.create_oval(0, 0, size, size, fill='red', outline='red')
-        indicator_window.mainloop()
-    threading.Thread(target=_show, daemon=True).start()
-
-# Function to hide the red dot indicator
-def hide_indicator():
-    global indicator_window
-    if indicator_window:
-        indicator_window.quit()
-        indicator_window = None
-
 # Function to toggle recording
 def toggle_recording():
     global recording, transcribing
@@ -72,6 +45,16 @@ def toggle_recording():
         threading.Thread(target=transcribe_audio).start()
     else:
         print("Transcription in progress, please wait...")
+
+# Function to show the red dot indicator
+def show_indicator():
+    if indicator_window:
+        indicator_window.after(0, indicator_window.deiconify)
+
+# Function to hide the red dot indicator
+def hide_indicator():
+    if indicator_window:
+        indicator_window.after(0, indicator_window.withdraw)
 
 # Audio callback function
 def audio_callback(indata, frames, time_info, status):
@@ -157,10 +140,24 @@ if __name__ == "__main__":
     # Start the event tap thread
     threading.Thread(target=run_event_tap, daemon=True).start()
 
-    # Keep the main thread alive
+    # Set up Tkinter window on the main thread
+    indicator_window = tk.Tk()
+    indicator_window.overrideredirect(True)  # Remove window decorations
+    indicator_window.attributes("-topmost", True)
+    indicator_window.configure(bg='red')
+    screen_width = indicator_window.winfo_screenwidth()
+    size = 20  # Size of the red dot
+    x = screen_width - size - 10
+    y = 10
+    indicator_window.geometry(f"{size}x{size}+{x}+{y}")
+    canvas = tk.Canvas(indicator_window, width=size, height=size, bg='red', highlightthickness=0)
+    canvas.pack()
+    canvas.create_oval(0, 0, size, size, fill='red', outline='red')
+    indicator_window.withdraw()  # Start with the indicator hidden
+
+    # Run the Tkinter main loop in the main thread
     try:
-        while True:
-            time.sleep(1)
+        indicator_window.mainloop()
     except KeyboardInterrupt:
         print("Exiting...")
         stream.stop()
