@@ -9,7 +9,7 @@ import argparse
 import sys
 import Quartz
 import AppKit  # PyObjC library
-from pynput import keyboard
+import subprocess
 
 # Command-line argument parsing
 def parse_arguments():
@@ -31,18 +31,18 @@ transcribing = False
 
 # Function to toggle recording
 def toggle_recording():
-    global recording
-    if not recording:
+    global recording, transcribing
+    if not recording and not transcribing:
         print("Recording started...")
         recording = True
-        # Show a notification or any other indicator as needed
         show_notification("Dictation", "Recording started")
-    else:
+    elif recording:
         print("Recording stopped.")
         recording = False
         show_notification("Dictation", "Recording stopped")
-        # Start transcription in a new thread
         threading.Thread(target=transcribe_audio).start()
+    else:
+        print("Transcription in progress, please wait...")
 
 # Function to show macOS notification
 def show_notification(title, message):
@@ -83,8 +83,9 @@ def transcribe_audio():
 
 # Function to send text to active application
 def send_text_to_active_app(text):
-    # Set clipboard content
-    os.system(f"echo '{text}' | pbcopy")
+    # Set clipboard content safely
+    process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+    process.communicate(input=text.encode('utf-8'))
     # Simulate Command+V to paste
     os.system('osascript -e \'tell application "System Events" to keystroke "v" using {command down}\'')
 
@@ -93,19 +94,17 @@ def tap_callback(proxy, type_, event, refcon):
     keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
     # F1 keycode is 122
     if keycode == 122:
-        # Suppress the event so it doesn't cause a beep
         toggle_recording()
-        return None  # Returning None suppresses the event
+        return None  # Suppress the event
     else:
-        # Allow other key events to be processed
         return event
 
 # Run the event tap in a separate thread
 def run_event_tap():
     event_mask = Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown)
     tap = Quartz.CGEventTapCreate(
-        Quartz.kCGSessionEventTap,  # Listen to key presses in this session
-        Quartz.kCGHeadInsertEventTap,  # Inserted at the head of the event stream
+        Quartz.kCGSessionEventTap,
+        Quartz.kCGHeadInsertEventTap,
         Quartz.kCGEventTapOptionDefault,
         event_mask,
         tap_callback,
