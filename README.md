@@ -1,4 +1,4 @@
-# macOS Dictation Tool
+# Whisper Dictation for MacOS
 
 For years, many users have struggled with the inconsistent performance of macOS's built-in dictation feature. This tool aims to solve that problem by providing a reliable, customizable, and powerful alternative using OpenAI's Whisper model for speech-to-text transcription.
 
