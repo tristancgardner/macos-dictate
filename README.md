@@ -417,16 +417,16 @@ Refer to [macOS Virtual Keycodes](https://eastmanreference.com/complete-list-of-
 
 We're constantly working to improve the macOS Dictation Tool. Here are some features we're planning to implement in future updates:
 
--   Responsive cursor updates for certain keywords like "New Line" or "New Paragraph"
--   Custom voice commands for text formatting (e.g., "Bold this", "Italicize that")
--   Real-time transcription display with on-the-fly editing
--   Better UI/UX for dictation settings including always-on-top indicator and top-bar icon
--   Extended punctuation auto-correction and smart capitalization abilities
--   Multi-language support with language detection
--   User-defined custom vocabulary and acronym expansion
--   Voice-activated undo and redo functionality
--   Integration with popular text editors and word processors
--   Customizable noise cancellation and audio filtering options
+-   [ ] Responsive cursor updates for certain keywords like "New Line" or "New Paragraph"
+-   [ ] Custom voice commands for text formatting (e.g., "Bold this", "Italicize that")
+-   [ ] Real-time transcription display with on-the-fly editing
+-   [ ] Better UI/UX for dictation settings including always-on-top indicator and top-bar icon
+-   [ ] Extended punctuation auto-correction and smart capitalization abilities
+-   [ ] Multi-language support with language detection
+-   [ ] User-defined custom vocabulary and acronym expansion
+-   [ ] Voice-activated undo and redo functionality
+-   [ ] Master log of all dictations saved to file for any use: training on your own speech patterns, etc.
+-   [ ] Customizable noise cancellation and audio filtering options
 
 We're excited about these upcoming improvements and welcome any suggestions for additional features!
 
