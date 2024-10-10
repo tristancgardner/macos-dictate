@@ -37,6 +37,8 @@ A macOS dictation tool that uses OpenAI's Whisper model for speech-to-text trans
 -   [Contributing](#contributing)
 -   [License](#license)
 -   [Acknowledgments](#acknowledgments)
+-   [Planned Future Features](#planned-future-features)
+-   [Issues and Feature Requests](#issues-and-feature-requests)
 
 ---
 
@@ -53,7 +55,7 @@ A macOS dictation tool that uses OpenAI's Whisper model for speech-to-text trans
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/macos-dictate.git
+git clone https://github.com/tristancgardner/macos-dictate.git
 cd macos-dictate
 ```
 
@@ -72,7 +74,15 @@ brew update
 brew install portaudio
 ```
 
-#### c. Install Python 3.10 or Higher (if not already installed)
+#### c. Install ffmpeg
+
+```bash
+brew install ffmpeg
+```
+
+This is required for Whisper to process audio files.
+
+#### d. Install Python 3.10 or Higher (if not already installed)
 
 Download and install Python from the official website:
 
@@ -159,12 +169,12 @@ Replace `base` with the desired Whisper model size (`tiny`, `base`, `small`, `me
 
 ### Start Dictation
 
--   Press the **F1** key to start recording.
+-   Press the **F1** key (default trigger key) to start recording.
 -   You will receive a notification indicating that recording has started.
 
 ### Stop Dictation
 
--   Press the **F1** key again to stop recording.
+-   Press the **F1** key (default trigger key) again to stop recording.
 -   You will receive a notification indicating that recording has stopped.
 -   The transcribed text will be automatically pasted into the active application.
 
@@ -365,6 +375,8 @@ if keycode == 96:
     return None  # Suppress the event to prevent system beep
 ```
 
+Remember to save the file after making changes.
+
 Refer to [macOS Virtual Keycodes](https://eastmanreference.com/complete-list-of-applescript-key-codes) for keycode values.
 
 ### Improve Transcription Accuracy
@@ -394,6 +406,45 @@ Refer to [macOS Virtual Keycodes](https://eastmanreference.com/complete-list-of-
 -   **Script Not Running at Startup:** Check the contents of your `.plist` file for correctness and verify that the paths are accurate.
 
 -   **Application Not Opening:** If the application created via AppleScript or Automator doesn't open, ensure that the script paths are correct and that you have execution permissions.
+
+---
+
+## Planned Future Features
+
+We're constantly working to improve the macOS Dictation Tool. Here are some features we're planning to implement in future updates:
+
+-   Responsive cursor updates for certain keywords like "New Line" or "New Paragraph"
+-   Custom voice commands for text formatting (e.g., "Bold this", "Italicize that")
+-   Real-time transcription display with on-the-fly editing
+-   Better UI/UX for dictation settings including always-on-top indicator and top-bar icon
+-   Extended punctuation auto-correction and smart capitalization abilities
+-   Multi-language support with language detection
+-   User-defined custom vocabulary and acronym expansion
+-   Voice-activated undo and redo functionality
+-   Integration with popular text editors and word processors
+-   Customizable noise cancellation and audio filtering options
+
+We're excited about these upcoming improvements and welcome any suggestions for additional features!
+
+---
+
+## Issues and Feature Requests
+
+We welcome feedback, bug reports, and feature requests! If you encounter any problems or have ideas for improvements, please use our GitHub issue tracker:
+
+-   For bug reports: [Submit an issue](https://github.com/tristancgardner/macos-dictate/issues/new?template=bug_report.md)
+-   For feature requests: [Submit a feature request](https://github.com/tristancgardner/macos-dictate/issues/new?template=feature_request.md)
+
+When submitting an issue, please provide as much detail as possible, including:
+
+-   Steps to reproduce the problem
+-   Expected behavior
+-   Actual behavior
+-   Your operating system version
+-   Your Python version
+-   Any relevant error messages or screenshots
+
+Your contributions help make this tool better for everyone. Thank you for your support!
 
 ---
 
