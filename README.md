@@ -236,12 +236,6 @@ tell application "Terminal"
 end tell
 ```
 
-**Instructions:**
-
--   When you double click the app executable on your desktop, terminal will open, and dictation is ready to use after you see the falling line post:
-    > _"...ting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature._ > _checkpoint = torch.load(fp, map_location=device)"_
--   Ignore any warnings about torch or malicious content via pickle hacks (for now).
-
 #### c. Save the Script as an Application
 
 -   Go to **File** > **Export**.
@@ -249,6 +243,12 @@ end tell
 -   Name it `Start Dictation`.
 -   Choose **Desktop** as the location.
 -   Click **Save**.
+
+**Instructions:**
+
+-   When you double click the app executable on your desktop, terminal will open, and dictation is ready to use after you see the falling line post:
+    > _"...ting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature._ > _checkpoint = torch.load(fp, map_location=device)"_
+-   Ignore any warnings about torch or malicious content via pickle hacks (for now).
 
 ## Running the Tool at Startup
 
