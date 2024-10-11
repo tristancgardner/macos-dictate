@@ -132,13 +132,15 @@ pip install torch sounddevice numpy pyobjc
 
 #### c. Install Whisper from GitHub
 
-Install the latest version of OpenAI Whisper directly from the GitHub repository:
+Install the latest version of OpenAI Whisper directly from the GitHub repository to utilize most recent ASR updates (as opposed to using `pip install openai-whisper`):
 
 ```bash
 pip install git+https://github.com/openai/whisper.git
 ```
 
 ### 5. Grant Permissions
+
+_You can skip this step and enable permissions once you run the application later on._
 
 #### a. Accessibility Permissions
 
@@ -170,11 +172,18 @@ python dictate.py --model base
 ```
 
 Replace `base` with the desired Whisper model size (`tiny`, `base`, `small`, `medium`, `large`).
+The base model is enabled by default if you don't use the `--model` tag.
+
+The base model uses about 400 to 500 megabytes of system RAM. The small model increases that by 400 to 500 mb. Use `Activity Monitor` to monitor RAM & CPU usage to find a model that has no system impact while left running persistenly.
 
 ### Start Dictation
 
--   Press the **F1** key (default trigger key) to start recording.
+-   Press the **F1** key (default trigger key) to start recording (press **fn** + **F1** if you haven't set function keys to override mac controls (the symbols on the function keys like brightness, volume, etc.)).
 -   You will receive a notification indicating that recording has started.
+
+### Change Trigger Key
+
+You can customize the trigger key for starting and stopping dictation. For instructions on how to change the trigger key, refer to the [Change the Trigger Key](#change-the-trigger-key) section in the Configuration part of this document.
 
 ### Stop Dictation
 
@@ -205,34 +214,33 @@ set defaultModel to "base"
 set chosenModel to choose from list modelSizes with prompt "Select Whisper model size:" default items defaultModel
 
 if chosenModel is false then
-    display alert "No model selected. Exiting."
-    return
+	display alert "No model selected. Exiting."
+	return
 end if
 
 set modelSize to item 1 of chosenModel
 
 -- Path to your virtual environment activation script
-set venvPath to POSIX path of (choose file with prompt "Select your virtual environment's 'activate' script:")
-set venvPathQuoted to quoted form of venvPath
+set venvPath to "/Users/yourusername/path/to/your/venv/bin/activate"
 
 -- Path to your Python script
-set scriptPath to POSIX path of (choose file with prompt "Select your 'dictate.py' script:")
-set scriptPathQuoted to quoted form of scriptPath
+set scriptPath to "/Users/yourusername/path/to/your/macos-dictate/dictate.py"
 
 -- Build the command to run
-set shellCommand to "source " & venvPathQuoted & " && python " & scriptPathQuoted & " --model " & modelSize
+set shellCommand to "source " & venvPath & " && python " & scriptPath & " --model " & modelSize
 
 -- Run the command in Terminal
 tell application "Terminal"
-    activate
-    do script shellCommand
+	activate
+	do script shellCommand
 end tell
 ```
 
 **Instructions:**
 
--   When you run the application, it will prompt you to select your virtual environment's `activate` script and the `dictate.py` script the first time.
--   The paths will be stored in the script for future use.
+-   When you double click the app executable on your desktop, terminal will open, and dictation is ready to use after you see the falling line post:
+    > _"...ting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature._ > _checkpoint = torch.load(fp, map_location=device)"_
+-   Ignore any warnings about torch or malicious content via pickle hacks (for now).
 
 #### c. Save the Script as an Application
 
@@ -241,55 +249,6 @@ end tell
 -   Name it `Start Dictation`.
 -   Choose **Desktop** as the location.
 -   Click **Save**.
-
-### Option 2: Using Automator
-
-#### a. Open Automator
-
--   Open **Automator** from your Applications folder.
-
-#### b. Create a New Application
-
--   Choose **Application** as the document type.
-
-#### c. Add a "Run Shell Script" Action
-
--   In the left sidebar, select **Actions**.
--   Search for **Run Shell Script**.
--   Drag **Run Shell Script** into the workflow area.
-
-#### d. Configure the Shell Script
-
-Replace the default script with the following:
-
-```bash
-#!/bin/bash
-
-# Prompt for model size
-modelSize=$(osascript -e 'choose from list {"tiny", "base", "small", "medium", "large"} with prompt "Select Whisper model size:" default items {"base"}')
-
-if [ "$modelSize" = "false" ]; then
-    osascript -e 'display alert "No model selected. Exiting."'
-    exit 0
-fi
-
-# Activate virtual environment
-source /path/to/your/venv/bin/activate
-
-# Run your Python script
-python /path/to/your/dictate.py --model "$modelSize"
-```
-
-**Replace `/path/to/your/venv/bin/activate`** and **`/path/to/your/dictate.py`** with the actual paths on your system.
-
-#### e. Save the Automator Application
-
--   Go to **File** > **Save**.
--   Name it `Start Dictation`.
--   Choose **Desktop** as the location.
--   Click **Save**.
-
----
 
 ## Running the Tool at Startup
 
