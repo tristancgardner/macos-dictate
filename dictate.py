@@ -10,6 +10,8 @@ import sys
 import Quartz
 import AppKit  # PyObjC library
 import subprocess
+import logging
+from pathlib import Path
 
 # Command-line argument parsing
 def parse_arguments():
@@ -29,20 +31,28 @@ result_queue = queue.Queue()
 recording = False
 transcribing = False
 
+# Replace the print statements setup near the start of the script, before the parse_arguments function
+log_file = Path.home() / '.dictate.log'
+logging.basicConfig(
+    filename=str(log_file),
+    level=logging.INFO,
+    format='%(asctime)s - %(message)s'
+)
+
 # Function to toggle recording
 def toggle_recording():
     global recording, transcribing
     if not recording and not transcribing:
-        print("Recording started...")
+        logging.info("Recording started...")
         recording = True
         show_notification("Dictation", "Recording started")
     elif recording:
-        print("Recording stopped.")
+        logging.info("Recording stopped.")
         recording = False
         show_notification("Dictation", "Recording stopped")
         threading.Thread(target=transcribe_audio).start()
     else:
-        print("Transcription in progress, please wait...")
+        logging.info("Transcription in progress, please wait...")
 
 # Function to show macOS notification
 def show_notification(title, message):
@@ -66,11 +76,11 @@ def transcribe_audio():
         if np.max(np.abs(audio)) != 0:
             audio = audio / np.max(np.abs(audio))
         else:
-            print("No audio data to transcribe.")
+            logging.info("No audio data to transcribe.")
             transcribing = False
             return
         # Transcribe with Whisper
-        print("Transcribing...")
+        logging.info("Transcribing...")
         result = model.transcribe(audio, fp16=False)
         text = result['text']
         result_queue.put(text)
@@ -78,7 +88,7 @@ def transcribe_audio():
     # Send text to active application
     while not result_queue.empty():
         text = result_queue.get()
-        print("Transcribed Text:", text)
+        logging.info("Transcribed Text: %s", text)
         send_text_to_active_app(text)
 
 # Function to send text to active application
@@ -111,7 +121,7 @@ def run_event_tap():
         None
     )
     if not tap:
-        print("Failed to create event tap. Please ensure the script has accessibility permissions.")
+        logging.error("Failed to create event tap. Please ensure the script has accessibility permissions.")
         sys.exit(1)
     run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
     Quartz.CFRunLoopAddSource(Quartz.CFRunLoopGetCurrent(), run_loop_source, Quartz.kCFRunLoopCommonModes)
@@ -124,7 +134,7 @@ if __name__ == "__main__":
     model_size = args.model
 
     # Load the Whisper model
-    print(f"Loading Whisper model '{model_size}'...")
+    logging.info(f"Loading Whisper model '{model_size}'...")
     model = whisper.load_model(model_size)
 
     # Set up audio stream
@@ -139,7 +149,7 @@ if __name__ == "__main__":
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("Exiting...")
+        logging.info("Exiting...")
         stream.stop()
         stream.close()
         sys.exit(0)
