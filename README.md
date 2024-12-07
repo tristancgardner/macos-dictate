@@ -1,21 +1,80 @@
 # Whisper Dictation for MacOS
 
-For years, many users have struggled with the inconsistent performance of macOS's built-in dictation feature. This tool aims to solve that problem by providing a reliable, customizable, and powerful alternative using OpenAI's Whisper model for speech-to-text transcription.
+![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
+
+A powerful and reliable alternative to macOS's built-in dictation feature, using OpenAI's Whisper model for speech-to-text transcription. This tool allows you to dictate text using your microphone and have it transcribed and pasted into any active application on your Mac, solving the long-standing issues of inconsistent performance in native macOS dictation.
 
 ![macOS Dictation Tool Header](./header_image.webp)
 
-A macOS dictation tool that uses OpenAI's Whisper model for speech-to-text transcription. This tool allows you to dictate text using your microphone and have it transcribed and pasted into the active application on your Mac.
-
-Installation time: 5-10 mintues
-
 ## Features
 
--   **Real-time dictation** using OpenAI's Whisper model.
--   **Customizable models**: Choose from different Whisper model sizes for varying accuracy and performance.
--   **Keyboard shortcut activation**: Start and stop dictation with a key press.
--   **Automatic pasting**: Transcribed text is automatically pasted into the active application.
--   **Easy startup**: Create a clickable application to start the dictation tool from your desktop.
--   **Run at startup**: Optionally configure the tool to run automatically when you log in.
+### Core Features
+
+-   **Real-time Dictation**: Instant speech-to-text conversion using OpenAI's Whisper model
+-   **Automatic Pasting**: Transcribed text instantly appears in your active application
+-   **Background Operation**: Runs silently in the background until activated
+-   **Microphone Flexibility**: Seamlessly switch between different audio input sources
+
+### Customization
+
+-   **Multiple Model Options**: Choose from various Whisper models:
+    -   `tiny` (~75MB RAM) - Fastest, basic accuracy
+    -   `base` (~150MB RAM) - Good balance of speed and accuracy
+    -   `small` (~500MB RAM) - Better accuracy, moderate resource usage
+    -   `medium` (~1.5GB RAM) - High accuracy, higher resource usage
+    -   `large` (~3GB RAM) - Highest accuracy, significant resource usage
+-   **Configurable Shortcuts**: Customize keyboard triggers to your preference
+-   **Startup Options**: Configure automatic startup on login
+
+### System Integration
+
+-   **Desktop Application**: Create a clickable app for easy access
+-   **System Tray Integration**: Quick access to controls and settings
+-   **Permissions Management**: Automated handling of system permissions
+
+## System Requirements
+
+-   **Operating System**: macOS 10.15 or higher
+-   **RAM**:
+    -   Minimum: 4GB (for tiny/base models)
+    -   Recommended: 8GB+ (for small/medium models)
+    -   High-Performance: 16GB+ (for large model)
+-   **Storage**:
+    -   500MB minimum
+    -   2GB+ recommended for multiple models
+-   **Processor**:
+    -   Intel: Core i5 or higher recommended
+    -   Apple Silicon: All models supported
+
+## Quick Start Guide
+
+1. **Installation** (5-10 minutes):
+
+```bash
+git clone https://github.com/tristancgardner/macos-dictate.git
+cd macos-dictate
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+2. **Basic Usage**:
+
+```bash
+# Start with default (base) model
+python dictate.py
+
+# Or specify a model size
+python dictate.py --model small
+```
+
+3. **Operation**:
+
+-   Press `F1` to start recording
+-   Speak clearly into your microphone
+-   Press `F1` again to stop and paste the text
 
 ---
 
@@ -208,6 +267,7 @@ You can create an application that you can double-click to start the dictation t
 #### b. Write the AppleScript
 
 Paste the following script into the editor:
+(New as of 241206)
 
 ```applescript
 -- Prompt the user to choose a Whisper model size
@@ -222,35 +282,28 @@ end if
 
 set modelSize to item 1 of chosenModel
 
--- Path to your virtual environment activation script
-set venvPath to "/Users/yourusername/path/to/your/venv/bin/activate"
+-- Direct path to the Python interpreter in your virtual environment
+set pythonPath to "/Users/tristangardner/.pyenv/versions/3.12.7/envs/venv/bin/python"
 
 -- Path to your Python script
-set scriptPath to "/Users/yourusername/path/to/your/macos-dictate/dictate.py"
+set scriptPath to "/Users/tristangardner/Documents/Programming/01_Apps/macos-dictate/dictate.py"
 
--- Build the command to run
-set shellCommand to "source " & venvPath & " && python " & scriptPath & " --model " & modelSize
+-- Build the command to use zsh to ensure proper environment loading
+set shellCommand to "zsh -l -c " & quoted form of (pythonPath & " " & scriptPath & " --model " & modelSize)
 
--- Run the command in Terminal
-tell application "Terminal"
-	activate
-	do script shellCommand
-end tell
+-- Run the Python script in the background without opening Terminal
+do shell script shellCommand & " >/dev/null 2>&1 &"
 ```
 
 #### c. Save the Script as an Application
 
 -   Go to **File** > **Export**.
 -   Set **File Format** to **Application**.
--   Name it `Start Dictation`.
--   Choose **Desktop** as the location.
+-   Name it `Dictate`.
+-   Choose **Applications** as the location.
 -   Click **Save**.
 
 **Instructions:**
-
--   When you double click the app executable on your desktop, terminal will open, and dictation is ready to use after you see the falling line post:
-    > _"...ting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature._ > _checkpoint = torch.load(fp, map_location=device)"_
--   Ignore any warnings about torch or malicious content via pickle hacks (for now).
 
 ## Running the Tool at Startup
 
@@ -354,9 +407,11 @@ Refer to [macOS Virtual Keycodes](https://eastmanreference.com/complete-list-of-
 
 ## Troubleshooting
 
--   **Accessibility Permissions:** Ensure your Terminal application or Python interpreter has the necessary permissions under **System Preferences** > **Security & Privacy** > **Privacy**.
+**Accessibility and Microphone Permissions**
+The app will automatically request Accessibility and Microphone permissions on its first run. If permissions are not requested or the app fails to start:
 
--   **Microphone Permissions:** Ensure your Terminal application or Python interpreter is allowed to access the microphone.
+-   Go to **System Settings** > **Privacy & Security** > **Accessibility** and **Microphone**.
+-   Add the application manually if necessary by clicking the **"+"** button and selecting it.
 
 -   **PortAudio Errors:** If you encounter errors related to `PortAudio` or `sounddevice`, ensure that `portaudio` is installed via Homebrew and reinstall `sounddevice`:
 
@@ -378,7 +433,13 @@ Refer to [macOS Virtual Keycodes](https://eastmanreference.com/complete-list-of-
 
 We're constantly working to improve the macOS Dictation Tool. Here are some features we're planning to implement in future updates:
 
--   [ ] Responsive cursor updates for certain keywords like "New Line" or "New Paragraph"
+-   [x] Fixed added space at beginning of every transcription
+-   [x] App now runs in the background with different permissions, terminal does not open
+-   [x] PID process cleanup logic added to prevent memory leaks
+-   [x] Allows changing input mic source without breaking the audio input source and requiring to restart the script/app - this solves an issue with MacOS's built-in dictation feature for over a decade
+-   [ ] **Add back the indicator for recording and recording stopped**
+-   [ ] (delayed) Responsive cursor updates for certain keywords like "New Line" or "New Paragraph"
+    -   Tested, not good enough yet for production
 -   [ ] Custom voice commands for text formatting (e.g., "Bold this", "Italicize that")
 -   [ ] Real-time transcription display with on-the-fly editing
 -   [ ] Better UI/UX for dictation settings including always-on-top indicator and top-bar icon

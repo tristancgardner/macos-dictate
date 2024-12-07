@@ -1,1 +1,0 @@
-do shell script "pythonw " & quoted form of (POSIX path of ((path to me as text) & "::") & "dictate.py") & " > /dev/null 2>&1 &" 

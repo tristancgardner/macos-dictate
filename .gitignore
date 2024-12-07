@@ -3,4 +3,5 @@ venv/
 __pycache__/
 .DS_Store
 .vscode/launch.json
-test.txt
+PID_process_cleanup_notes.md
+test_event_tap.py
