@@ -265,7 +265,7 @@ def transcribe_audio():
     text = result['text'].strip()
     logging.info(f"Raw transcribed text: '{text}'")
 
-    text = cleanup_text(text).strip()
+    text = cleanup_text(text).strip() + " "
     logging.info(f"Cleaned transcribed text: '{text}'")
 
     # Send text to active application
