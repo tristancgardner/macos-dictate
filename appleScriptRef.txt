@@ -1,0 +1,23 @@
+-- Prompt the user to choose a Whisper model size
+set modelSizes to {"tiny", "base", "small", "medium", "large"}
+set defaultModel to "base"
+set chosenModel to choose from list modelSizes with prompt "Select Whisper model size:" default items defaultModel
+
+if chosenModel is false then
+	display alert "No model selected. Exiting."
+	return
+end if
+
+set modelSize to item 1 of chosenModel
+
+-- Direct path to the Python interpreter in your virtual environment
+set pythonPath to "/Users/tristangardner/.pyenv/versions/3.12.7/envs/venv/bin/python"
+
+-- Path to your Python script
+set scriptPath to "/Users/tristangardner/Documents/Programming/01_Apps/macos-dictate/dictate.py"
+
+-- Build the command to use zsh to ensure proper environment loading
+set shellCommand to "zsh -l -c " & quoted form of (pythonPath & " " & scriptPath & " --model " & modelSize)
+
+-- Run the Python script in the background without opening Terminal
+do shell script shellCommand & " >/dev/null 2>&1 &"

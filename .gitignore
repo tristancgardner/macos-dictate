@@ -5,3 +5,4 @@ __pycache__/
 .vscode/launch.json
 PID_process_cleanup_notes.md
 test_event_tap.py
+.vscode/
