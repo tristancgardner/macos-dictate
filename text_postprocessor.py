@@ -6,6 +6,7 @@ import time
 WORD_MAPPINGS = {
     r'super-?base': 'Supabase',
     r'mtp': 'MCP',
+    r'versal': 'Vercel',
 }
 
 def correct_variations(text, mappings):
