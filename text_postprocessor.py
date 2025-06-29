@@ -5,6 +5,7 @@ import time
 
 WORD_MAPPINGS = {
     r'super-?base': 'Supabase',
+    r'mtp': 'MCP',
 }
 
 def correct_variations(text, mappings):
