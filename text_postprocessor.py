@@ -5,6 +5,10 @@ import time
 
 WORD_MAPPINGS = {
     r'super-?base': 'Supabase',
+    r'super base': 'Supabase',
+    r'supabase': 'Supabase',
+    r'next\.js': 'Next.js',
+    r'nextjs': 'Next.js',
     r'mtp': 'MCP',
     r'versal': 'Vercel',
 }
