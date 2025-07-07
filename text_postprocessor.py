@@ -11,6 +11,8 @@ WORD_MAPPINGS = {
     r'nextjs': 'Next.js',
     r'mtp': 'MCP',
     r'versal': 'Vercel',
+    r'file ID': 'file_id',
+    r'File ID': 'file_id',
 }
 
 def correct_variations(text, mappings):
