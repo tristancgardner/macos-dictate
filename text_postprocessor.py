@@ -16,6 +16,9 @@ WORD_MAPPINGS = {
     r'result json': 'result_json',
     r'dialog summary': 'dialog_summary',
     r'speaker map': 'speaker_map',
+    r'dialogue': 'dialog',
+    r'dialogue summary': 'dialog_summary',
+    r'file name column': 'file_name column',
 }
 
 def correct_variations(text, mappings):
