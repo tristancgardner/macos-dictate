@@ -13,6 +13,9 @@ WORD_MAPPINGS = {
     r'versal': 'Vercel',
     r'file ID': 'file_id',
     r'File ID': 'file_id',
+    r'result json': 'result_json',
+    r'dialog summary': 'dialog_summary',
+    r'speaker map': 'speaker_map',
 }
 
 def correct_variations(text, mappings):
