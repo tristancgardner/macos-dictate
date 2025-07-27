@@ -19,7 +19,11 @@ WORD_MAPPINGS = {
     r'dialogue': 'dialog',
     r'dialogue summary': 'dialog_summary',
     r'file name column': 'file_name column',
+    r'OG ASR': 'og_asr',
+    r' original ASR': 'og_asr',
+    
 }
+
 
 def correct_variations(text, mappings):
     for pattern, replacement in mappings.items():
