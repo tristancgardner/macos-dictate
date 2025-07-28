@@ -21,6 +21,8 @@ WORD_MAPPINGS = {
     r'file name column': 'file_name column',
     r'OG ASR': 'og_asr',
     r' original ASR': 'og_asr',
+    r'original asr': 'og_asr',
+    r'O-G-A-S-R': 'og_asr',
     
 }
 
