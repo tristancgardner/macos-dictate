@@ -23,6 +23,9 @@ WORD_MAPPINGS = {
     r' original ASR': 'og_asr',
     r'original asr': 'og_asr',
     r'O-G-A-S-R': 'og_asr',
+    r'Cloud': 'Claude',
+    r'CloudCode': 'Claude-Code',
+    r'Cloud Code': 'Claude-Code',
     
 }
 
