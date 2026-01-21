@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/tristangardner/Documents/Programming/01_Apps/macos-dictate log --oneline --all)",
+      "Bash(git -C /Users/tristangardner/Documents/Programming/01_Apps/macos-dictate show f14b585 --stat)",
+      "Bash(git -C /Users/tristangardner/Documents/Programming/01_Apps/macos-dictate show:*)",
+      "Bash(git -C /Users/tristangardner/Documents/Programming/01_Apps/macos-dictate log --all --oneline)",
+      "Bash(ls:*)"
+    ]
+  }
+}

@@ -21,9 +21,10 @@ import random
 from datetime import datetime
 
 from pathlib import Path
-project_root = Path(__file__).parent 
+project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 from text_postprocessor import cleanup_text, send_text_to_active_app
+from device_monitor import DeviceMonitor, refresh_sounddevice, get_current_default_device_name, COREAUDIO_AVAILABLE
 
 # --------------------------------------
 # Command-line argument parsing
@@ -56,6 +57,8 @@ last_heartbeat = datetime.now()
 stream_healthy = False
 watchdog_active = True
 audio_timeout = 10  # seconds before we consider audio system stalled
+device_monitor = None  # CoreAudio device change monitor
+last_polled_device_name = None  # For polling fallback
 
 LOG_FILE = Path.home() / '.dictate.log'
 logging.basicConfig(
@@ -260,23 +263,26 @@ def toggle_recording():
 # Watchdog function to monitor system health
 # --------------------------------------
 def watchdog_monitor():
-    global watchdog_active, stream, stream_healthy
-    
+    global watchdog_active, stream, stream_healthy, last_polled_device_name
+
     logging.info("Watchdog thread started")
-    
+
+    poll_counter = 0
+    DEVICE_POLL_INTERVAL = 5  # seconds between device polling
+
     while watchdog_active:
         try:
             # Check if audio stream is healthy when recording
             if recording:
                 time_since_heartbeat = (datetime.now() - last_heartbeat).total_seconds()
-                
+
                 if time_since_heartbeat > audio_timeout:
                     logging.warning(f"Audio system stalled! No heartbeat for {time_since_heartbeat:.1f}s")
                     show_notification("Dictation Error", "Audio system stalled, recovering...")
-                    
+
                     # Force restart the audio stream
                     restart_audio_stream()
-            
+
             # Periodically check sounddevice status when not recording
             elif not recording and not transcribing and stream is None:
                 # Every ~10 seconds, check that we can still access audio
@@ -287,10 +293,28 @@ def watchdog_monitor():
                     except Exception as e:
                         logging.error(f"Microphone access failed in watchdog: {e}")
                         stream_healthy = False
-                        
+
+            # Polling fallback for device changes (backup for CoreAudio listener)
+            poll_counter += 1
+            if poll_counter >= DEVICE_POLL_INTERVAL and not recording and not transcribing:
+                poll_counter = 0
+                try:
+                    # Refresh and check current default device
+                    refresh_sounddevice()
+                    current_device_name = get_current_default_device_name()
+
+                    if last_polled_device_name is not None and current_device_name != last_polled_device_name:
+                        logging.info(f"Polling detected device change: {last_polled_device_name} -> {current_device_name}")
+                        apply_device_change()
+                    else:
+                        last_polled_device_name = current_device_name
+
+                except Exception as e:
+                    logging.warning(f"Device polling error: {e}")
+
             # Sleep to avoid consuming too much CPU
             time.sleep(1)
-            
+
         except Exception as e:
             logging.error(f"Watchdog error: {e}")
             logging.error(traceback.format_exc())
@@ -344,6 +368,72 @@ def update_heartbeat():
     """Update the heartbeat timestamp"""
     global last_heartbeat
     last_heartbeat = datetime.now()
+
+
+def apply_device_change(old_device_id=None, new_device_id=None):
+    """
+    Handle audio device change by refreshing sounddevice and recreating stream.
+
+    Called by CoreAudio listener when default input device changes, or by
+    polling fallback when a device change is detected.
+    """
+    global stream, stream_healthy, last_polled_device_name
+
+    logging.info(f"Device change detected: {old_device_id} -> {new_device_id}")
+
+    # Don't switch devices while actively recording
+    if recording:
+        logging.info("Device change ignored: recording in progress")
+        return
+
+    # Don't switch while transcribing
+    if transcribing:
+        logging.info("Device change ignored: transcription in progress")
+        return
+
+    try:
+        # Close existing stream before refreshing device list
+        if stream is not None:
+            try:
+                if stream.active:
+                    stream.stop()
+                stream.close()
+                logging.info("Closed existing audio stream")
+            except Exception as e:
+                logging.warning(f"Error closing stream during device change: {e}")
+            stream = None
+
+        # Refresh sounddevice/PortAudio device cache
+        refresh_sounddevice()
+
+        # Get the new default device info
+        new_device_name = get_current_default_device_name()
+        last_polled_device_name = new_device_name
+        logging.info(f"New default input device: {new_device_name}")
+
+        # Pre-initialize new stream with new device
+        device_index = select_input_device(args.device)
+        actual_device_name = sd.query_devices(device_index)['name']
+        logging.info(f"Creating new stream with device: {actual_device_name}")
+
+        stream = sd.InputStream(
+            callback=audio_callback,
+            channels=1,
+            samplerate=16000,
+            device=device_index
+        )
+
+        stream_healthy = True
+        update_heartbeat()
+
+        show_notification("Dictation", f"Switched to: {actual_device_name}")
+        logging.info("Audio stream recreated with new device")
+
+    except Exception as e:
+        logging.error(f"Failed to apply device change: {e}")
+        logging.error(traceback.format_exc())
+        stream_healthy = False
+        show_notification("Dictation Error", "Failed to switch audio device")
 
 # --------------------------------------
 # Select input device
@@ -534,8 +624,14 @@ if __name__ == "__main__":
     
         def signal_exit_handler(signum, frame):
             logging.info(f"Received signal {signum}, shutting down...")
-            global watchdog_active
+            global watchdog_active, device_monitor
             watchdog_active = False
+            # Stop device monitor
+            if device_monitor is not None:
+                try:
+                    device_monitor.stop()
+                except Exception as e:
+                    logging.warning(f"Error stopping device monitor: {e}")
             cleanup_lock_file()
             if stream is not None:
                 try:
@@ -579,7 +675,19 @@ if __name__ == "__main__":
         logging.info("Starting watchdog monitor thread...")
         watchdog_thread = threading.Thread(target=watchdog_monitor, daemon=True)
         watchdog_thread.start()
-        
+
+        # Initialize polling baseline
+        last_polled_device_name = device_name
+
+        # Start the device monitor (CoreAudio listener)
+        logging.info("Starting device monitor...")
+        device_monitor = DeviceMonitor(apply_device_change)
+        if device_monitor.start():
+            logging.info("CoreAudio device monitor started successfully")
+        else:
+            logging.warning("CoreAudio device monitor failed to start, using polling fallback only")
+            device_monitor = None
+
         # Show notification that we're ready
         show_notification("Dictation", "Ready (press F1 to start)")
     
@@ -590,6 +698,11 @@ if __name__ == "__main__":
         except KeyboardInterrupt:
             logging.info("KeyboardInterrupt: Exiting...")
             watchdog_active = False
+            if device_monitor is not None:
+                try:
+                    device_monitor.stop()
+                except Exception as e:
+                    logging.warning(f"Error stopping device monitor: {e}")
             cleanup_lock_file()
             if stream is not None:
                 try:
