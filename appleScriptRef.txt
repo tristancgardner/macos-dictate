@@ -1,14 +1,17 @@
 -- Prompt the user to choose a Whisper model size
-set modelSizes to {"tiny", "base", "small", "medium", "large"}
-set defaultModel to "base"
-set chosenModel to choose from list modelSizes with prompt "Select Whisper model size:" default items defaultModel
+-- set modelSizes to {"tiny", "base", "small", "medium", "large"}
+-- set defaultModel to "base"
+-- set chosenModel to choose from list modelSizes with prompt "Select Whisper model size:" default items defaultModel
 
-if chosenModel is false then
-	display alert "No model selected. Exiting."
-	return
-end if
+-- if chosenModel is false then
+-- 	display alert "No model selected. Exiting."
+-- 	return
+-- end if
 
-set modelSize to item 1 of chosenModel
+-- set modelSize to item 1 of chosenModel
+
+-- Hardcoded model size
+set modelSize to "small"
 
 -- Direct path to the Python interpreter in your virtual environment
 set pythonPath to "/Users/tristangardner/.pyenv/versions/3.12.7/envs/venv/bin/python"
