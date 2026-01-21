@@ -27,6 +27,8 @@ WORD_MAPPINGS = {
     r'CloudCode': 'Claude-Code',
     r'Cloud Code': 'Claude-Code',
     r'Club code': 'Claude-Code',
+    r'Clawed code': 'Claude-Code',
+    r'Soros': 'Suora',
     
 }
 
