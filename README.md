@@ -14,6 +14,7 @@ A powerful and reliable alternative to macOS's built-in dictation feature, using
 
 - **Real-time Dictation**: Instant speech-to-text conversion using OpenAI's Whisper model
 - **Automatic Pasting**: Transcribed text instantly appears in your active application
+- **Repaste Last Transcription**: Press F2 to repaste your last transcription without re-recording
 - **Background Operation**: Runs silently in the background until activated
 - **Microphone Flexibility**: Seamlessly switch between different audio input sources
 
@@ -75,6 +76,7 @@ python dictate.py --model small
 - Press **F1** (or **fn + F1** if function keys control system settings) to start recording.
 - Speak clearly into your microphone.
 - Press **F1** again to stop and paste the text.
+- Press **F2** to repaste the last transcription at any time.
 
 ---
 
@@ -91,6 +93,7 @@ python dictate.py --model small
   - [Running the Script](#running-the-script)
   - [Start Dictation](#start-dictation)
   - [Stop Dictation](#stop-dictation)
+  - [Repaste Last Transcription](#repaste-last-transcription)
 - [Creating a Clickable Application](#creating-a-clickable-application)
   - [Option 1: Using AppleScript](#option-1-using-applescript)
   - [Option 2: Using Automator](#option-2-using-automator)
@@ -259,6 +262,12 @@ You can customize the trigger key for starting and stopping dictation. For instr
 - Press the **F1** key (default trigger key) again to stop recording.
 - You will receive a notification indicating that recording has stopped.
 - The transcribed text will be automatically pasted into the active application.
+
+### Repaste Last Transcription
+
+- Press the **F2** key to repaste your last transcription at any time.
+- Useful when you need to paste the same text into multiple locations or if the initial paste didn't work.
+- The transcription is read from the log file, so it persists across sessions.
 
 ---
 
@@ -439,6 +448,7 @@ We're constantly working to improve the macOS Dictation Tool. Here are some feat
 - [X] PID process cleanup logic added to prevent memory leaks
 - [X] Allows changing input mic source without breaking the audio input source and requiring to restart the script/app - this solves an issue with MacOS's built-in dictation feature for over a decade
 - [X] Add back the indicator for recording and recording stopped
+- [X] F2 repaste feature - quickly repaste last transcription without re-recording
 - [ ] (delayed) Responsive cursor updates for certain keywords like "New Line" or "New Paragraph"
   - Tested, not good enough yet for production
 - [ ] Custom voice commands for text formatting (e.g., "Bold this", "Italicize that")
