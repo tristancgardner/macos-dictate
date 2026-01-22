@@ -209,6 +209,9 @@ def toggle_recording():
         # Restart stream if needed
         if stream_needs_restart:
             try:
+                # Save current output device before any audio changes
+                saved_output_device = get_current_output_device()
+
                 # Close old stream if it exists
                 if stream is not None:
                     try:
@@ -216,15 +219,15 @@ def toggle_recording():
                         stream.close()
                     except Exception as e:
                         logging.warning(f"Error stopping previous stream: {e}")
-    
+
                 device_index = select_input_device(args.device)
                 device_name = sd.query_devices(device_index)['name']
                 logging.info(f"Using input device: {device_name}")
-    
+
                 # Clear any old data from the queue
                 while not audio_queue.empty():
                     audio_queue.get()
-                
+
                 stream = sd.InputStream(
                     callback=audio_callback,
                     channels=1,
@@ -232,11 +235,15 @@ def toggle_recording():
                     device=device_index
                 )
                 stream.start()
-                
+
+                # Restore output device if it was changed
+                if saved_output_device:
+                    restore_output_device(saved_output_device)
+
                 # Verify stream started correctly
                 if not stream.active:
                     raise RuntimeError("Stream failed to start")
-                
+
                 stream_healthy = True
                 update_heartbeat()
                 
@@ -325,8 +332,11 @@ def restart_audio_stream():
     global stream, recording, transcribing, audio_queue
     
     logging.info("Attempting to restart audio stream")
-    
+
     try:
+        # Save current output device before any audio changes
+        saved_output_device = get_current_output_device()
+
         # Close old stream if it exists
         if stream is not None:
             try:
@@ -334,12 +344,12 @@ def restart_audio_stream():
                 stream.close()
             except Exception as e:
                 logging.warning(f"Error closing old stream: {e}")
-                
+
         # Recreate stream with same device as before
         device_index = select_input_device(args.device)
         device_name = sd.query_devices(device_index)['name']
         logging.info(f"Recreating stream with device: {device_name}")
-        
+
         stream = sd.InputStream(
             callback=audio_callback,
             channels=1,
@@ -347,13 +357,17 @@ def restart_audio_stream():
             device=device_index
         )
         stream.start()
-        
+
+        # Restore output device if it was changed
+        if saved_output_device:
+            restore_output_device(saved_output_device)
+
         # Update status
         stream_healthy = True
-        
+
         # Reset heartbeat
         update_heartbeat()
-        
+
         show_notification("Dictation", "Audio system recovered")
         logging.info("Audio stream successfully restarted")
         
@@ -434,6 +448,86 @@ def apply_device_change(old_device_id=None, new_device_id=None):
         logging.error(traceback.format_exc())
         stream_healthy = False
         show_notification("Dictation Error", "Failed to switch audio device")
+
+# --------------------------------------
+# Output device preservation functions
+# --------------------------------------
+def get_current_output_device():
+    """Get the current system output device name."""
+    try:
+        # Try using SwitchAudioSource if available
+        result = subprocess.run(
+            ['SwitchAudioSource', '-c', '-t', 'output'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            device_name = result.stdout.strip()
+            logging.info(f"Current output device: {device_name}")
+            return device_name
+    except FileNotFoundError:
+        logging.debug("SwitchAudioSource not found, using AppleScript fallback")
+    except Exception as e:
+        logging.warning(f"Error getting output device via SwitchAudioSource: {e}")
+
+    # Fallback to AppleScript
+    try:
+        script = 'tell application "System Preferences" to quit'
+        subprocess.run(['osascript', '-e', script], capture_output=True, timeout=2)
+
+        script = '''
+        tell application "System Preferences"
+            reveal anchor "output" of pane id "com.apple.preference.sound"
+        end tell
+        delay 0.5
+        tell application "System Events"
+            tell process "System Preferences"
+                set outputDevice to value of text field 1 of row 1 of table 1 of scroll area 1 of tab group 1 of window 1
+            end tell
+        end tell
+        tell application "System Preferences" to quit
+        return outputDevice
+        '''
+        # This AppleScript approach is complex and may not work reliably
+        # Instead, use sounddevice's default device query
+        default_output = sd.default.device[1]
+        if default_output is not None:
+            devices = sd.query_devices()
+            if 0 <= default_output < len(devices):
+                device_name = devices[default_output]['name']
+                logging.info(f"Current output device (via sounddevice): {device_name}")
+                return device_name
+    except Exception as e:
+        logging.warning(f"Error getting output device: {e}")
+
+    return None
+
+def restore_output_device(device_name):
+    """Restore the system output device to the specified device."""
+    if device_name is None:
+        return
+
+    try:
+        # Try using SwitchAudioSource if available
+        result = subprocess.run(
+            ['SwitchAudioSource', '-s', device_name, '-t', 'output'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            logging.info(f"Restored output device to: {device_name}")
+            return True
+    except FileNotFoundError:
+        logging.debug("SwitchAudioSource not found, cannot restore output device")
+    except Exception as e:
+        logging.warning(f"Error restoring output device via SwitchAudioSource: {e}")
+
+    # Note: AppleScript fallback for setting output device is complex and unreliable
+    # If SwitchAudioSource is not available, log a warning
+    logging.warning(f"Could not restore output device. Install SwitchAudioSource: brew install switchaudio-osx")
+    return False
 
 # --------------------------------------
 # Select input device
@@ -652,17 +746,24 @@ if __name__ == "__main__":
         # Prepare audio stream for listening
         # Pre-initialize stream to avoid delays when starting to record
         try:
+            # Save current output device before any audio changes
+            saved_output_device = get_current_output_device()
+
             device_index = select_input_device(args.device)
             device_name = sd.query_devices(device_index)['name']
             logging.info(f"Pre-initializing input device: {device_name}")
-            
+
             stream = sd.InputStream(
                 callback=audio_callback,
                 channels=1,
                 samplerate=16000,
                 device=device_index
             )
-            
+
+            # Restore output device if it was changed during initialization
+            if saved_output_device:
+                restore_output_device(saved_output_device)
+
             # Don't start the stream yet, just initialize it
             logging.info("Audio stream pre-initialized successfully.")
             update_heartbeat()
