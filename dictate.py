@@ -56,9 +56,10 @@ stream = None
 last_heartbeat = datetime.now()
 stream_healthy = False
 watchdog_active = True
-audio_timeout = 10  # seconds before we consider audio system stalled
+audio_timeout = 5  # seconds before we consider audio system stalled
 device_monitor = None  # CoreAudio device change monitor
 last_polled_device_name = None  # For polling fallback
+callback_invocation_count = 0  # Track audio callback invocations for diagnostics
 
 LOG_FILE = Path.home() / '.dictate.log'
 logging.basicConfig(
@@ -165,13 +166,16 @@ def run_event_tap():
 # Audio callback
 # --------------------------------------
 def audio_callback(indata, frames, time_info, status):
+    global callback_invocation_count
     try:
         if status:
             logging.warning(f"Audio callback status: {status}")
-        
+
+        callback_invocation_count += 1
+
         if recording:
             audio_queue.put(indata.copy())
-            
+
         # Update heartbeat regardless of recording status
         # This shows the audio system is active
         update_heartbeat()
@@ -265,6 +269,36 @@ def toggle_recording():
         show_notification("Dictation", "Recording started")
         logging.info("Recording started...")
         update_heartbeat()  # Reset heartbeat timer
+
+        # Early audio verification - check that audio is actually being captured
+        def verify_audio_capture():
+            global recording, callback_invocation_count
+            initial_count = callback_invocation_count
+            initial_queue_size = audio_queue.qsize()
+            time.sleep(0.5)  # Wait 500ms
+
+            if not recording:
+                return  # User stopped recording, no need to verify
+
+            new_count = callback_invocation_count
+            new_queue_size = audio_queue.qsize()
+
+            callbacks_received = new_count - initial_count
+            items_queued = new_queue_size - initial_queue_size
+
+            logging.info(f"Audio verification: {callbacks_received} callbacks, {items_queued} items queued in 500ms")
+
+            if callbacks_received == 0:
+                logging.warning("Audio verification FAILED: No callbacks received!")
+                logging.warning(f"Stream active: {stream.active if stream else 'None'}")
+                show_notification("Dictation Warning", "Audio not flowing, attempting recovery...")
+                # Attempt immediate recovery
+                restart_audio_stream()
+            elif items_queued == 0 and recording:
+                logging.warning("Audio verification WARNING: Callbacks running but no audio queued")
+
+        # Run verification in background thread
+        threading.Thread(target=verify_audio_capture, daemon=True).start()
     else:
         # Stop recording, start transcription
         recording = False
@@ -322,8 +356,14 @@ def watchdog_monitor():
             if recording:
                 time_since_heartbeat = (datetime.now() - last_heartbeat).total_seconds()
 
+                # Diagnostic: log stream status vs heartbeat mismatch
+                if stream is not None and time_since_heartbeat > 2:
+                    stream_active = stream.active if stream else False
+                    logging.warning(f"Heartbeat stale ({time_since_heartbeat:.1f}s) but stream.active={stream_active}, callbacks={callback_invocation_count}")
+
                 if time_since_heartbeat > audio_timeout:
                     logging.warning(f"Audio system stalled! No heartbeat for {time_since_heartbeat:.1f}s")
+                    logging.warning(f"Stream state: active={stream.active if stream else 'None'}, queue_size={audio_queue.qsize()}")
                     show_notification("Dictation Error", "Audio system stalled, recovering...")
 
                     # Force restart the audio stream
@@ -383,6 +423,17 @@ def restart_audio_stream():
                 stream.close()
             except Exception as e:
                 logging.warning(f"Error closing old stream: {e}")
+
+        # Clear any stale data from the queue before creating new stream
+        queue_cleared = 0
+        while not audio_queue.empty():
+            try:
+                audio_queue.get_nowait()
+                queue_cleared += 1
+            except queue.Empty:
+                break
+        if queue_cleared > 0:
+            logging.info(f"Cleared {queue_cleared} stale items from audio queue")
 
         # Recreate stream with same device as before
         device_index = select_input_device(args.device)
@@ -475,6 +526,8 @@ def apply_device_change(old_device_id=None, new_device_id=None):
             samplerate=16000,
             device=device_index
         )
+        stream.start()
+        logging.info("Started new audio stream after device change")
 
         stream_healthy = True
         update_heartbeat()
