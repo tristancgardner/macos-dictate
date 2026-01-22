@@ -2,6 +2,7 @@ import re
 import subprocess
 import os
 import time
+import threading
 
 WORD_MAPPINGS = {
     r'super-?base': 'Supabase',
@@ -56,6 +57,12 @@ def cleanup_text(text):
 
     return text
 
+def _deferred_clipboard_restore(old_clip, delay=1.0):
+    """Restore clipboard content after a delay (runs in background thread)."""
+    time.sleep(delay)
+    restore_proc = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+    restore_proc.communicate(input=old_clip)
+
 def send_text_to_active_app(text):
     # Step 1: Capture the current clipboard content
     try:
@@ -64,20 +71,19 @@ def send_text_to_active_app(text):
         old_clip = b''
 
     # Step 2: Copy the new text
-    try:
-        copy_proc = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
-        copy_proc.communicate(input=text.encode('utf-8'))
+    copy_proc = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+    copy_proc.communicate(input=text.encode('utf-8'))
 
-        # Wait a bit for the system to register new clipboard content
-        time.sleep(0.3)
+    # Wait a bit for the system to register new clipboard content
+    time.sleep(0.3)
 
-        # Step 3: Paste via Cmd+V
-        os.system('osascript -e \'tell application "System Events" to keystroke "v" using {command down}\'')
+    # Step 3: Paste via Cmd+V
+    os.system('osascript -e \'tell application "System Events" to keystroke "v" using {command down}\'')
 
-        # Optional: wait for paste action to complete on slow systems
-        time.sleep(0.2)
-
-    finally:
-        # Step 4: Restore old clipboard content
-        restore_proc = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
-        restore_proc.communicate(input=old_clip)
+    # Step 4: Restore clipboard in background after delay (allows paste to complete)
+    restore_thread = threading.Thread(
+        target=_deferred_clipboard_restore,
+        args=(old_clip,),
+        daemon=True
+    )
+    restore_thread.start()

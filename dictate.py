@@ -116,6 +116,12 @@ def tap_callback(proxy, type_, event, refcon):
         toggle_recording()
         return None  # Suppress the F1 keystroke so it won't pass through
 
+    # F2 key => Repaste last transcription
+    if keycode == 120:  # F2
+        logging.info("F2 key detected.")
+        repaste_last_transcription()
+        return None  # Suppress the F2 keystroke so it won't pass through
+
     # Option+Shift+D => Quit
     if type_ == Quartz.kCGEventKeyDown and keycode == 2:  # 'D'
         shift_pressed = (flags & Quartz.kCGEventFlagMaskShift) == Quartz.kCGEventFlagMaskShift
@@ -265,6 +271,39 @@ def toggle_recording():
         show_notification("Dictation", "Recording stopped")
         logging.info("Recording stopped, starting transcription thread...")
         threading.Thread(target=transcribe_audio).start()
+
+# --------------------------------------
+# Repaste last transcription (F2)
+# --------------------------------------
+def repaste_last_transcription():
+    """Repaste the last transcription by reading from the log file."""
+    try:
+        if not LOG_FILE.exists():
+            logging.info("No log file found for repaste.")
+            show_notification("Dictation", "No previous transcription")
+            return
+
+        # Read log file and search backwards for most recent transcription
+        with open(LOG_FILE, 'r') as f:
+            lines = f.readlines()
+
+        # Search backwards for "Cleaned transcribed text:"
+        pattern = re.compile(r"Cleaned transcribed text: '(.+)'$")
+        for line in reversed(lines):
+            match = pattern.search(line)
+            if match:
+                text = match.group(1)
+                logging.info(f"Repasting from log: '{text}'")
+                send_text_to_active_app(text)
+                show_notification("Dictation", "Repasted last transcription")
+                return
+
+        logging.info("No transcription found in log file.")
+        show_notification("Dictation", "No previous transcription")
+
+    except Exception as e:
+        logging.error(f"Error repasting from log: {e}")
+        show_notification("Dictation", "Failed to repaste")
 
 # --------------------------------------
 # Watchdog function to monitor system health
@@ -790,7 +829,7 @@ if __name__ == "__main__":
             device_monitor = None
 
         # Show notification that we're ready
-        show_notification("Dictation", "Ready (press F1 to start)")
+        show_notification("Dictation", "Ready (F1=record, F2=repaste)")
     
         # Keep main thread alive
         try:
