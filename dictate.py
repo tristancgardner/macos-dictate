@@ -61,6 +61,11 @@ device_monitor = None  # CoreAudio device change monitor
 last_polled_device_name = None  # For polling fallback
 callback_invocation_count = 0  # Track audio callback invocations for diagnostics
 
+# Thread synchronization primitives
+state_lock = threading.RLock()   # Protects: recording, transcribing, stream_healthy, last_heartbeat, callback_count
+stream_lock = threading.Lock()    # Protects: stream object, restart operations
+restart_in_progress = False       # Prevents concurrent restarts
+
 LOG_FILE = Path.home() / '.dictate.log'
 logging.basicConfig(
     filename=str(LOG_FILE),
@@ -188,120 +193,144 @@ def audio_callback(indata, frames, time_info, status):
 # --------------------------------------
 def toggle_recording():
     """
-    - If not recording and not transcribing => Start a new InputStream 
-    - If currently recording => Stop & transcribe 
+    - If not recording and not transcribing => Start a new InputStream
+    - If currently recording => Stop & transcribe
     - If transcribing => ignore
     """
     global recording, transcribing, stream, stream_healthy
 
-    if transcribing:
-        logging.info("Ignored toggle: transcription in progress.")
-        show_notification("Dictation", "Please wait, transcribing...")
-        return
+    # Check state under lock to avoid race conditions
+    with state_lock:
+        if transcribing:
+            logging.info("Ignored toggle: transcription in progress.")
+            show_notification("Dictation", "Please wait, transcribing...")
+            return
+        is_recording = recording
 
-    if not recording:
+    if not is_recording:
         # Check if we need to create a new stream or use existing one
         stream_needs_restart = True
-        
-        # Check if stream exists and is valid
-        if stream is not None:
-            try:
-                # Test if stream is active by checking if it's stopped
-                if stream.active:
-                    stream_needs_restart = False
-                    logging.info("Using existing active stream")
-                else:
-                    logging.info("Stream exists but is not active, will restart")
-            except Exception as e:
-                logging.warning(f"Error checking stream status: {e}")
-                stream_needs_restart = True
-        
-        # Restart stream if needed
-        if stream_needs_restart:
-            try:
-                # Save current output device before any audio changes
-                saved_output_device = get_current_output_device()
 
-                # Close old stream if it exists
-                if stream is not None:
-                    try:
-                        stream.stop()
-                        stream.close()
-                    except Exception as e:
-                        logging.warning(f"Error stopping previous stream: {e}")
+        # Check if stream exists and is valid - use stream_lock for safe access
+        with stream_lock:
+            if stream is not None:
+                try:
+                    # Test if stream is active by checking if it's stopped
+                    if stream.active:
+                        stream_needs_restart = False
+                        logging.info("Using existing active stream")
+                    else:
+                        logging.info("Stream exists but is not active, will restart")
+                except Exception as e:
+                    logging.warning(f"Error checking stream status: {e}")
+                    stream_needs_restart = True
 
-                device_index = select_input_device(args.device)
-                device_name = sd.query_devices(device_index)['name']
-                logging.info(f"Using input device: {device_name}")
+            # Restart stream if needed (still inside stream_lock)
+            if stream_needs_restart:
+                try:
+                    # Save current output device before any audio changes
+                    saved_output_device = get_current_output_device()
 
-                # Clear any old data from the queue
-                while not audio_queue.empty():
-                    audio_queue.get()
+                    # Close old stream if it exists
+                    if stream is not None:
+                        try:
+                            stream.stop()
+                            stream.close()
+                        except Exception as e:
+                            logging.warning(f"Error stopping previous stream: {e}")
 
-                stream = sd.InputStream(
-                    callback=audio_callback,
-                    channels=1,
-                    samplerate=16000,
-                    device=device_index
-                )
-                stream.start()
+                    device_index = select_input_device(args.device)
+                    device_name = sd.query_devices(device_index)['name']
+                    logging.info(f"Using input device: {device_name}")
 
-                # Restore output device if it was changed
-                if saved_output_device:
-                    restore_output_device(saved_output_device)
+                    # Clear any old data from the queue
+                    while not audio_queue.empty():
+                        audio_queue.get()
 
-                # Verify stream started correctly
-                if not stream.active:
-                    raise RuntimeError("Stream failed to start")
+                    stream = sd.InputStream(
+                        callback=audio_callback,
+                        channels=1,
+                        samplerate=16000,
+                        device=device_index
+                    )
+                    stream.start()
 
-                stream_healthy = True
-                update_heartbeat()
-                
-            except Exception as e:
-                logging.error(f"Failed to start stream: {e}")
-                logging.error(traceback.format_exc())
-                show_notification("Dictation Error", "Failed to start recording")
-                stream_healthy = False
-                return  # Exit without setting recording=True
-        
-        # Start recording with the stream
-        recording = True
+                    # Restore output device if it was changed
+                    if saved_output_device:
+                        restore_output_device(saved_output_device)
+
+                    # Verify stream started correctly
+                    if not stream.active:
+                        raise RuntimeError("Stream failed to start")
+
+                    with state_lock:
+                        stream_healthy = True
+                        update_heartbeat()
+
+                except Exception as e:
+                    logging.error(f"Failed to start stream: {e}")
+                    logging.error(traceback.format_exc())
+                    show_notification("Dictation Error", "Failed to start recording")
+                    with state_lock:
+                        stream_healthy = False
+                    return  # Exit without setting recording=True
+
+        # Start recording with the stream - update state under lock
+        with state_lock:
+            recording = True
+            update_heartbeat()  # Reset heartbeat timer
         show_notification("Dictation", "Recording started")
         logging.info("Recording started...")
-        update_heartbeat()  # Reset heartbeat timer
 
         # Early audio verification - check that audio is actually being captured
         def verify_audio_capture():
             global recording, callback_invocation_count
-            initial_count = callback_invocation_count
+            # Capture initial state under lock
+            with state_lock:
+                initial_count = callback_invocation_count
+                is_recording = recording
             initial_queue_size = audio_queue.qsize()
-            time.sleep(0.5)  # Wait 500ms
 
-            if not recording:
-                return  # User stopped recording, no need to verify
+            time.sleep(0.75)  # Wait 750ms (increased from 500ms for busy systems)
 
-            new_count = callback_invocation_count
+            # Check state again under lock
+            with state_lock:
+                if not recording:
+                    return  # User stopped recording, no need to verify
+                new_count = callback_invocation_count
+                is_still_recording = recording
+
             new_queue_size = audio_queue.qsize()
 
             callbacks_received = new_count - initial_count
             items_queued = new_queue_size - initial_queue_size
+            min_expected_callbacks = 5  # At 16kHz with typical buffer sizes, expect ~30 callbacks in 750ms
 
-            logging.info(f"Audio verification: {callbacks_received} callbacks, {items_queued} items queued in 500ms")
+            logging.info(f"Audio verification: {callbacks_received} callbacks, {items_queued} items queued in 750ms")
 
-            if callbacks_received == 0:
-                logging.warning("Audio verification FAILED: No callbacks received!")
-                logging.warning(f"Stream active: {stream.active if stream else 'None'}")
+            if callbacks_received < min_expected_callbacks:
+                logging.warning(f"Audio verification FAILED: Only {callbacks_received} callbacks (expected >= {min_expected_callbacks})")
+                # Check stream state safely
+                stream_active = None
+                with stream_lock:
+                    if stream is not None:
+                        try:
+                            stream_active = stream.active
+                        except Exception:
+                            pass
+                logging.warning(f"Stream active: {stream_active}")
                 show_notification("Dictation Warning", "Audio not flowing, attempting recovery...")
                 # Attempt immediate recovery
                 restart_audio_stream()
-            elif items_queued == 0 and recording:
+            elif items_queued == 0 and is_still_recording:
                 logging.warning("Audio verification WARNING: Callbacks running but no audio queued")
 
         # Run verification in background thread
         threading.Thread(target=verify_audio_capture, daemon=True).start()
     else:
-        # Stop recording, start transcription
-        recording = False
+        # Stop recording, start transcription - update state under lock
+        with state_lock:
+            recording = False
         show_notification("Dictation", "Recording stopped")
         logging.info("Recording stopped, starting transcription thread...")
         threading.Thread(target=transcribe_audio).start()
@@ -352,37 +381,68 @@ def watchdog_monitor():
 
     while watchdog_active:
         try:
+            # Copy state variables under lock at start of iteration (avoid TOCTOU)
+            with state_lock:
+                is_recording = recording
+                is_transcribing = transcribing
+                heartbeat_copy = last_heartbeat
+                callback_count_copy = callback_invocation_count
+
             # Check if audio stream is healthy when recording
-            if recording:
-                time_since_heartbeat = (datetime.now() - last_heartbeat).total_seconds()
+            if is_recording:
+                time_since_heartbeat = (datetime.now() - heartbeat_copy).total_seconds()
 
                 # Diagnostic: log stream status vs heartbeat mismatch
-                if stream is not None and time_since_heartbeat > 2:
-                    stream_active = stream.active if stream else False
-                    logging.warning(f"Heartbeat stale ({time_since_heartbeat:.1f}s) but stream.active={stream_active}, callbacks={callback_invocation_count}")
+                if time_since_heartbeat > 2:
+                    # Safely check stream state
+                    stream_active = None
+                    with stream_lock:
+                        if stream is not None:
+                            try:
+                                stream_active = stream.active
+                            except Exception:
+                                pass
+                    if stream_active is not None:
+                        logging.warning(f"Heartbeat stale ({time_since_heartbeat:.1f}s) but stream.active={stream_active}, callbacks={callback_count_copy}")
 
                 if time_since_heartbeat > audio_timeout:
                     logging.warning(f"Audio system stalled! No heartbeat for {time_since_heartbeat:.1f}s")
-                    logging.warning(f"Stream state: active={stream.active if stream else 'None'}, queue_size={audio_queue.qsize()}")
+                    # Safely get stream state for logging
+                    stream_active = None
+                    with stream_lock:
+                        if stream is not None:
+                            try:
+                                stream_active = stream.active
+                            except Exception:
+                                pass
+                    logging.warning(f"Stream state: active={stream_active}, queue_size={audio_queue.qsize()}")
                     show_notification("Dictation Error", "Audio system stalled, recovering...")
 
                     # Force restart the audio stream
                     restart_audio_stream()
 
             # Periodically check sounddevice status when not recording
-            elif not recording and not transcribing and stream is None:
-                # Every ~10 seconds, check that we can still access audio
-                if random.random() < 0.1:  # 10% chance each cycle
-                    try:
-                        test_microphone_access()
-                        stream_healthy = True
-                    except Exception as e:
-                        logging.error(f"Microphone access failed in watchdog: {e}")
-                        stream_healthy = False
+            elif not is_recording and not is_transcribing:
+                # Check if stream is None safely
+                stream_is_none = False
+                with stream_lock:
+                    stream_is_none = (stream is None)
+
+                if stream_is_none:
+                    # Every ~10 seconds, check that we can still access audio
+                    if random.random() < 0.1:  # 10% chance each cycle
+                        try:
+                            test_microphone_access()
+                            with state_lock:
+                                stream_healthy = True
+                        except Exception as e:
+                            logging.error(f"Microphone access failed in watchdog: {e}")
+                            with state_lock:
+                                stream_healthy = False
 
             # Polling fallback for device changes (backup for CoreAudio listener)
             poll_counter += 1
-            if poll_counter >= DEVICE_POLL_INTERVAL and not recording and not transcribing:
+            if poll_counter >= DEVICE_POLL_INTERVAL and not is_recording and not is_transcribing:
                 poll_counter = 0
                 try:
                     # Refresh and check current default device
@@ -407,12 +467,30 @@ def watchdog_monitor():
             time.sleep(5)  # Wait longer after an error
 
 def restart_audio_stream():
-    """Safely restart the audio stream"""
-    global stream, recording, transcribing, audio_queue
-    
-    logging.info("Attempting to restart audio stream")
+    """Safely restart the audio stream with thread-safe guards"""
+    global stream, recording, transcribing, audio_queue, stream_healthy, restart_in_progress
+
+    # Prevent concurrent restarts - use non-blocking acquire
+    if not stream_lock.acquire(blocking=False):
+        logging.info("Restart skipped: another restart in progress (lock held)")
+        return
 
     try:
+        # Check if restart already in progress (double-check pattern)
+        if restart_in_progress:
+            logging.info("Restart skipped: another restart in progress (flag set)")
+            return
+
+        restart_in_progress = True
+
+        # Check transcribing flag under state_lock BEFORE clearing queue
+        with state_lock:
+            if transcribing:
+                logging.info("Restart skipped: transcription in progress")
+                return
+
+        logging.info("Attempting to restart audio stream")
+
         # Save current output device before any audio changes
         saved_output_device = get_current_output_device()
 
@@ -425,6 +503,7 @@ def restart_audio_stream():
                 logging.warning(f"Error closing old stream: {e}")
 
         # Clear any stale data from the queue before creating new stream
+        # Safe to clear since we verified transcribing=False above
         queue_cleared = 0
         while not audio_queue.empty():
             try:
@@ -452,21 +531,24 @@ def restart_audio_stream():
         if saved_output_device:
             restore_output_device(saved_output_device)
 
-        # Update status
-        stream_healthy = True
-
-        # Reset heartbeat
-        update_heartbeat()
+        # Update status under lock
+        with state_lock:
+            stream_healthy = True
+            update_heartbeat()
 
         show_notification("Dictation", "Audio system recovered")
         logging.info("Audio stream successfully restarted")
-        
+
     except Exception as e:
         logging.error(f"Failed to restart audio stream: {e}")
         logging.error(traceback.format_exc())
-        stream_healthy = False
-        recording = False
+        with state_lock:
+            stream_healthy = False
+            recording = False
         show_notification("Dictation Error", "Failed to restart audio")
+    finally:
+        restart_in_progress = False
+        stream_lock.release()
 
 def update_heartbeat():
     """Update the heartbeat timestamp"""
@@ -485,61 +567,64 @@ def apply_device_change(old_device_id=None, new_device_id=None):
 
     logging.info(f"Device change detected: {old_device_id} -> {new_device_id}")
 
-    # Don't switch devices while actively recording
-    if recording:
-        logging.info("Device change ignored: recording in progress")
-        return
+    # Check recording/transcribing state under lock
+    with state_lock:
+        if recording:
+            logging.info("Device change ignored: recording in progress")
+            return
+        if transcribing:
+            logging.info("Device change ignored: transcription in progress")
+            return
 
-    # Don't switch while transcribing
-    if transcribing:
-        logging.info("Device change ignored: transcription in progress")
-        return
+    # Acquire stream_lock for stream operations
+    with stream_lock:
+        try:
+            # Close existing stream before refreshing device list
+            if stream is not None:
+                try:
+                    if stream.active:
+                        stream.stop()
+                    stream.close()
+                    logging.info("Closed existing audio stream")
+                except Exception as e:
+                    logging.warning(f"Error closing stream during device change: {e}")
+                stream = None
 
-    try:
-        # Close existing stream before refreshing device list
-        if stream is not None:
-            try:
-                if stream.active:
-                    stream.stop()
-                stream.close()
-                logging.info("Closed existing audio stream")
-            except Exception as e:
-                logging.warning(f"Error closing stream during device change: {e}")
-            stream = None
+            # Refresh sounddevice/PortAudio device cache
+            refresh_sounddevice()
 
-        # Refresh sounddevice/PortAudio device cache
-        refresh_sounddevice()
+            # Get the new default device info
+            new_device_name = get_current_default_device_name()
+            last_polled_device_name = new_device_name
+            logging.info(f"New default input device: {new_device_name}")
 
-        # Get the new default device info
-        new_device_name = get_current_default_device_name()
-        last_polled_device_name = new_device_name
-        logging.info(f"New default input device: {new_device_name}")
+            # Pre-initialize new stream with new device
+            device_index = select_input_device(args.device)
+            actual_device_name = sd.query_devices(device_index)['name']
+            logging.info(f"Creating new stream with device: {actual_device_name}")
 
-        # Pre-initialize new stream with new device
-        device_index = select_input_device(args.device)
-        actual_device_name = sd.query_devices(device_index)['name']
-        logging.info(f"Creating new stream with device: {actual_device_name}")
+            stream = sd.InputStream(
+                callback=audio_callback,
+                channels=1,
+                samplerate=16000,
+                device=device_index
+            )
+            stream.start()
+            logging.info("Started new audio stream after device change")
 
-        stream = sd.InputStream(
-            callback=audio_callback,
-            channels=1,
-            samplerate=16000,
-            device=device_index
-        )
-        stream.start()
-        logging.info("Started new audio stream after device change")
+            with state_lock:
+                stream_healthy = True
+                update_heartbeat()
 
-        stream_healthy = True
-        update_heartbeat()
+            show_notification("Dictation", f"Switched to: {actual_device_name}")
+            logging.info("Audio stream recreated with new device")
 
-        show_notification("Dictation", f"Switched to: {actual_device_name}")
-        logging.info("Audio stream recreated with new device")
-
-    except Exception as e:
-        logging.error(f"Failed to apply device change: {e}")
-        logging.error(traceback.format_exc())
-        stream_healthy = False
-        show_notification("Dictation Error", "Failed to switch audio device")
+        except Exception as e:
+            logging.error(f"Failed to apply device change: {e}")
+            logging.error(traceback.format_exc())
+            with state_lock:
+                stream_healthy = False
+            show_notification("Dictation Error", "Failed to switch audio device")
 
 # --------------------------------------
 # Output device preservation functions
@@ -662,7 +747,9 @@ def show_notification(title, message):
 # --------------------------------------
 def transcribe_audio():
     global transcribing
-    transcribing = True
+    # Set transcribing flag under lock
+    with state_lock:
+        transcribing = True
     transcribe_start_time = datetime.now()
     max_transcribe_time = 60  # seconds before transcription times out
 
@@ -679,12 +766,11 @@ def transcribe_audio():
                     break
         except Exception as e:
             logging.error(f"Error gathering audio data: {e}")
-            
+
         if not audio_data:
             logging.info("No audio data captured; skipping transcription.")
             show_notification("Dictation", "No audio recorded")
-            transcribing = False
-            return
+            return  # finally block will set transcribing=False
 
         audio = np.concatenate(audio_data, axis=0).flatten()
         logging.info(f"Captured {len(audio)} samples from queue.")
@@ -695,8 +781,7 @@ def transcribe_audio():
         if max_amp < 1e-5:  # Arbitrary tiny threshold
             logging.info("Audio is essentially silent; skipping transcription.")
             show_notification("Dictation", "Audio too quiet, try again")
-            transcribing = False
-            return
+            return  # finally block will set transcribing=False
 
         # Normalize
         audio = audio / max_amp
@@ -735,14 +820,12 @@ def transcribe_audio():
             time.sleep(0.5)
             
         if timeout_reached:
-            transcribing = False
-            return
-            
+            return  # finally block will set transcribing=False
+
         if not result_container["success"]:
             logging.error(f"Transcription failed: {result_container['error']}")
             show_notification("Dictation Error", "Transcription failed")
-            transcribing = False
-            return
+            return  # finally block will set transcribing=False
             
         # Process the transcription result
         result = result_container["result"]
@@ -763,9 +846,11 @@ def transcribe_audio():
         logging.error(f"Error in transcription process: {e}")
         logging.error(traceback.format_exc())
         show_notification("Dictation Error", "Transcription error")
-    
+
     finally:
-        transcribing = False
+        # Clear transcribing flag under lock
+        with state_lock:
+            transcribing = False
 
 # --------------------------------------
 # Test microphone access
