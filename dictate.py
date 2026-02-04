@@ -66,6 +66,10 @@ state_lock = threading.RLock()   # Protects: recording, transcribing, stream_hea
 stream_lock = threading.Lock()    # Protects: stream object, restart operations
 restart_in_progress = False       # Prevents concurrent restarts
 
+# Event tap status - signals main thread if event tap fails
+event_tap_ready = threading.Event()
+event_tap_failed = threading.Event()
+
 LOG_FILE = Path.home() / '.dictate.log'
 logging.basicConfig(
     filename=str(LOG_FILE),
@@ -80,12 +84,25 @@ LOCK_FILE = "/tmp/dictate.lock"
 # --------------------------------------
 def setup_lock_file():
     if os.path.exists(LOCK_FILE):
-        with open(LOCK_FILE, "r") as f:
-            old_pid = int(f.read().strip())
-            if psutil.pid_exists(old_pid):
-                print(f"Another instance is already running with PID {old_pid}. Exiting.")
-                sys.exit(0)
-    
+        try:
+            with open(LOCK_FILE, "r") as f:
+                old_pid = int(f.read().strip())
+                # Check if the old process is actually running dictate.py
+                if psutil.pid_exists(old_pid):
+                    try:
+                        proc = psutil.Process(old_pid)
+                        cmdline = ' '.join(proc.cmdline())
+                        if 'dictate.py' in cmdline:
+                            # Old instance exists - kill it instead of exiting
+                            logging.info(f"Killing stale instance with PID {old_pid}")
+                            os.kill(old_pid, signal.SIGKILL)
+                            time.sleep(0.3)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+        except (ValueError, IOError):
+            # Lock file is corrupted or unreadable, just overwrite it
+            pass
+
     with open(LOCK_FILE, "w") as f:
         f.write(str(os.getpid()))
 
@@ -102,10 +119,19 @@ def kill_old_processes():
     try:
         result = subprocess.check_output(["pgrep", "-f", "dictate.py"]).decode().splitlines()
         current_pid = os.getpid()
+        killed_any = False
         for pid in result:
             if int(pid) != current_pid:  # Skip the current process
                 logging.info(f"Killing old process with PID {pid}")
-                os.kill(int(pid), signal.SIGTERM)
+                try:
+                    os.kill(int(pid), signal.SIGKILL)  # Use SIGKILL for immediate termination
+                    killed_any = True
+                except ProcessLookupError:
+                    logging.info(f"Process {pid} already dead")
+                except PermissionError:
+                    logging.warning(f"Permission denied killing process {pid}")
+        if killed_any:
+            logging.info("Waiting for old processes to terminate...")
     except subprocess.CalledProcessError:
         logging.info("No old processes found to kill.")
 
@@ -155,7 +181,8 @@ def run_event_tap():
     )
     if not tap:
         logging.error("Failed to create event tap. Check Accessibility permissions.")
-        sys.exit(1)
+        event_tap_failed.set()  # Signal main thread that event tap failed
+        return  # Don't call sys.exit() - it doesn't work in daemon threads
 
     run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
     Quartz.CFRunLoopAddSource(
@@ -165,6 +192,7 @@ def run_event_tap():
     )
     Quartz.CGEventTapEnable(tap, True)
     logging.info("Event tap started successfully.")
+    event_tap_ready.set()  # Signal main thread that event tap is ready
     Quartz.CFRunLoopRun()
 
 # --------------------------------------
@@ -876,12 +904,26 @@ if __name__ == "__main__":
         logging.info(f"Dictation tool starting (model: {model_size})")
         logging.info("=" * 60)
     
+        # Kill old processes FIRST before starting event tap
+        kill_old_processes()
+        time.sleep(0.5)  # Give processes time to die
+
         # Start the event tap in a separate thread
         logging.info("Starting event tap thread...")
         threading.Thread(target=run_event_tap, daemon=True).start()
-    
-        # (Optional) kill old processes
-        kill_old_processes()
+
+        # Wait for event tap to initialize (max 3 seconds)
+        logging.info("Waiting for event tap to initialize...")
+        event_tap_ready.wait(timeout=3.0)
+
+        # Check if event tap failed
+        if event_tap_failed.is_set() or not event_tap_ready.is_set():
+            logging.error("Event tap failed to start. Exiting.")
+            show_notification("Dictation Error", "Accessibility permission denied. Add Python to Accessibility settings.")
+            cleanup_lock_file()
+            sys.exit(1)
+
+        logging.info("Event tap initialized successfully.")
     
         # Force macOS to show processes, ensuring the script is recognized
         os.system('osascript -e \'tell application "System Events" to get the name of every process\'')
