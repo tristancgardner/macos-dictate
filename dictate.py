@@ -291,7 +291,7 @@ def toggle_recording():
                 is_recording = recording
             initial_queue_size = audio_queue.qsize()
 
-            time.sleep(0.75)  # Wait 750ms (increased from 500ms for busy systems)
+            time.sleep(1.0)  # Wait 1000ms (increased from 750ms for busy systems)
 
             # Check state again under lock
             with state_lock:
@@ -304,9 +304,9 @@ def toggle_recording():
 
             callbacks_received = new_count - initial_count
             items_queued = new_queue_size - initial_queue_size
-            min_expected_callbacks = 5  # At 16kHz with typical buffer sizes, expect ~30 callbacks in 750ms
+            min_expected_callbacks = 5  # At 16kHz with typical buffer sizes, expect ~40 callbacks in 1000ms
 
-            logging.info(f"Audio verification: {callbacks_received} callbacks, {items_queued} items queued in 750ms")
+            logging.info(f"Audio verification: {callbacks_received} callbacks, {items_queued} items queued in 1000ms")
 
             if callbacks_received < min_expected_callbacks:
                 logging.warning(f"Audio verification FAILED: Only {callbacks_received} callbacks (expected >= {min_expected_callbacks})")
