@@ -60,6 +60,19 @@ audio_timeout = 5  # seconds before we consider audio system stalled
 device_monitor = None  # CoreAudio device change monitor
 last_polled_device_name = None  # For polling fallback
 callback_invocation_count = 0  # Track audio callback invocations for diagnostics
+append_mode = False  # When True, transcription appends as bullet to markdown file
+
+# Load .env.local for custom shortcut config (e.g. APPEND_BULLET_FILE path)
+ENV_LOCAL_FILE = Path(__file__).parent / '.env.local'
+if ENV_LOCAL_FILE.exists():
+    with open(ENV_LOCAL_FILE, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, _, value = line.partition('=')
+                os.environ.setdefault(key.strip(), value.strip())
+
+APPEND_BULLET_FILE = os.environ.get('APPEND_BULLET_FILE')
 
 # Thread synchronization primitives
 state_lock = threading.RLock()   # Protects: recording, transcribing, stream_healthy, last_heartbeat, callback_count
@@ -142,10 +155,19 @@ def tap_callback(proxy, type_, event, refcon):
     keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
     flags = Quartz.CGEventGetFlags(event)
 
-    # F1 key => Toggle recording
+    # Cmd+F1 => Start recording in append-to-file mode
+    # Plain F1 => Toggle recording (also stops append-mode recording)
     if keycode == 122:  # F1
-        logging.info("F1 key detected.")
-        toggle_recording()
+        cmd_pressed = (flags & Quartz.kCGEventFlagMaskCommand) == Quartz.kCGEventFlagMaskCommand
+        if cmd_pressed and APPEND_BULLET_FILE:
+            global append_mode
+            append_mode = True
+            logging.info("Cmd+F1 detected: append-to-file mode activated.")
+            show_notification("Dictation", "Recording for TODO append...")
+            toggle_recording()
+        else:
+            logging.info("F1 key detected.")
+            toggle_recording()
         return None  # Suppress the F1 keystroke so it won't pass through
 
     # F2 key => Repaste last transcription
@@ -760,10 +782,44 @@ def show_notification(title, message):
     os.system(f'''osascript -e 'display notification "{message}" with title "{title}"' ''')
 
 # --------------------------------------
+# Append transcription as bullet to markdown file
+# --------------------------------------
+def append_bullet_to_file(text):
+    """Append text as a bullet point to the configured markdown file."""
+    target = Path(APPEND_BULLET_FILE)
+    try:
+        # Ensure parent directory exists
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        # Ensure file ends with newline before appending
+        needs_newline = False
+        if target.exists():
+            with open(target, 'rb') as f:
+                f.seek(0, 2)  # seek to end
+                if f.tell() > 0:
+                    f.seek(-1, 2)
+                    needs_newline = f.read(1) != b'\n'
+
+        with open(target, 'a') as f:
+            if needs_newline:
+                f.write('\n')
+            f.write(f'- {text}\n')
+
+        logging.info(f"Appended bullet to {target}: '- {text}'")
+        # Escape single quotes for osascript
+        safe_text = text.replace("'", "'\\''").replace('"', '\\"')
+        show_notification("TODO Added", safe_text)
+        return True
+    except Exception as e:
+        logging.error(f"Failed to append bullet to {target}: {e}")
+        show_notification("Dictation Error", "Failed to append to file")
+        return False
+
+# --------------------------------------
 # Transcribe audio (runs in a thread)
 # --------------------------------------
 def transcribe_audio():
-    global transcribing
+    global transcribing, append_mode
     # Set transcribing flag under lock
     with state_lock:
         transcribing = True
@@ -849,12 +905,15 @@ def transcribe_audio():
         text = result['text'].strip()
         logging.info(f"Raw transcribed text: '{text}'")
 
-        text = cleanup_text(text).strip() + " "
+        text = cleanup_text(text).strip()
         logging.info(f"Cleaned transcribed text: '{text}'")
 
-        # Send text to active application
         if text:
-            send_text_to_active_app(text)
+            # Check if we're in append-to-file mode
+            if append_mode and APPEND_BULLET_FILE:
+                append_bullet_to_file(text)
+            else:
+                send_text_to_active_app(text + " ")
         else:
             logging.info("No text to paste (empty transcription).")
             show_notification("Dictation", "No text detected")
@@ -865,7 +924,8 @@ def transcribe_audio():
         show_notification("Dictation Error", "Transcription error")
 
     finally:
-        # Clear transcribing flag under lock
+        # Clear transcribing and append_mode flags under lock
+        append_mode = False
         with state_lock:
             transcribing = False
 
@@ -998,7 +1058,11 @@ if __name__ == "__main__":
             device_monitor = None
 
         # Show notification that we're ready
-        show_notification("Dictation", "Ready (F1=record, F2=repaste)")
+        ready_msg = "Ready (F1=record, F2=repaste"
+        if APPEND_BULLET_FILE:
+            ready_msg += ", Cmd+F1=TODO"
+        ready_msg += ")"
+        show_notification("Dictation", ready_msg)
     
         # Keep main thread alive
         try:
