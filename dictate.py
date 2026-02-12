@@ -310,51 +310,40 @@ def toggle_recording():
         show_notification("Dictation", "Recording started")
         logging.info("Recording started...")
 
-        # Early audio verification - check that audio is actually being captured
-        def verify_audio_capture():
-            global recording, callback_invocation_count
-            # Capture initial state under lock
-            with state_lock:
-                initial_count = callback_invocation_count
-                is_recording = recording
-            initial_queue_size = audio_queue.qsize()
-
-            time.sleep(1.0)  # Wait 1000ms (increased from 750ms for busy systems)
-
-            # Check state again under lock
-            with state_lock:
-                if not recording:
-                    return  # User stopped recording, no need to verify
-                new_count = callback_invocation_count
-                is_still_recording = recording
-
-            new_queue_size = audio_queue.qsize()
-
-            callbacks_received = new_count - initial_count
-            items_queued = new_queue_size - initial_queue_size
-            min_expected_callbacks = 5  # At 16kHz with typical buffer sizes, expect ~40 callbacks in 1000ms
-
-            logging.info(f"Audio verification: {callbacks_received} callbacks, {items_queued} items queued in 1000ms")
-
-            if callbacks_received < min_expected_callbacks:
-                logging.warning(f"Audio verification FAILED: Only {callbacks_received} callbacks (expected >= {min_expected_callbacks})")
-                # Check stream state safely
-                stream_active = None
-                with stream_lock:
-                    if stream is not None:
-                        try:
-                            stream_active = stream.active
-                        except Exception:
-                            pass
-                logging.warning(f"Stream active: {stream_active}")
-                show_notification("Dictation Warning", "Audio not flowing, attempting recovery...")
-                # Attempt immediate recovery
-                restart_audio_stream()
-            elif items_queued == 0 and is_still_recording:
-                logging.warning("Audio verification WARNING: Callbacks running but no audio queued")
-
-        # Run verification in background thread
-        threading.Thread(target=verify_audio_capture, daemon=True).start()
+        # Early audio verification - DISABLED for testing
+        # Was causing false-positive recovery restarts on recording start
+        # def verify_audio_capture():
+        #     global recording, callback_invocation_count
+        #     with state_lock:
+        #         initial_count = callback_invocation_count
+        #         is_recording = recording
+        #     initial_queue_size = audio_queue.qsize()
+        #     time.sleep(1.0)
+        #     with state_lock:
+        #         if not recording:
+        #             return
+        #         new_count = callback_invocation_count
+        #         is_still_recording = recording
+        #     new_queue_size = audio_queue.qsize()
+        #     callbacks_received = new_count - initial_count
+        #     items_queued = new_queue_size - initial_queue_size
+        #     min_expected_callbacks = 5
+        #     logging.info(f"Audio verification: {callbacks_received} callbacks, {items_queued} items queued in 1000ms")
+        #     if callbacks_received < min_expected_callbacks:
+        #         logging.warning(f"Audio verification FAILED: Only {callbacks_received} callbacks (expected >= {min_expected_callbacks})")
+        #         stream_active = None
+        #         with stream_lock:
+        #             if stream is not None:
+        #                 try:
+        #                     stream_active = stream.active
+        #                 except Exception:
+        #                     pass
+        #         logging.warning(f"Stream active: {stream_active}")
+        #         show_notification("Dictation Warning", "Audio not flowing, attempting recovery...")
+        #         restart_audio_stream()
+        #     elif items_queued == 0 and is_still_recording:
+        #         logging.warning("Audio verification WARNING: Callbacks running but no audio queued")
+        # threading.Thread(target=verify_audio_capture, daemon=True).start()
     else:
         # Stop recording, start transcription - update state under lock
         with state_lock:
