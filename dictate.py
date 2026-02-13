@@ -332,44 +332,45 @@ def toggle_recording():
         show_notification("Dictation", "Recording started")
         logging.info("Recording started...")
 
-        # Early audio verification - DISABLED for testing
-        # Was causing false-positive recovery restarts on recording start
-        # def verify_audio_capture():
-        #     global recording, callback_invocation_count
-        #     with state_lock:
-        #         initial_count = callback_invocation_count
-        #         is_recording = recording
-        #     initial_queue_size = audio_queue.qsize()
-        #     time.sleep(1.0)
-        #     with state_lock:
-        #         if not recording:
-        #             return
-        #         new_count = callback_invocation_count
-        #         is_still_recording = recording
-        #     new_queue_size = audio_queue.qsize()
-        #     callbacks_received = new_count - initial_count
-        #     items_queued = new_queue_size - initial_queue_size
-        #     min_expected_callbacks = 5
-        #     logging.info(f"Audio verification: {callbacks_received} callbacks, {items_queued} items queued in 1000ms")
-        #     if callbacks_received < min_expected_callbacks:
-        #         logging.warning(f"Audio verification FAILED: Only {callbacks_received} callbacks (expected >= {min_expected_callbacks})")
-        #         stream_active = None
-        #         with stream_lock:
-        #             if stream is not None:
-        #                 try:
-        #                     stream_active = stream.active
-        #                 except Exception:
-        #                     pass
-        #         logging.warning(f"Stream active: {stream_active}")
-        #         show_notification("Dictation Warning", "Audio not flowing, attempting recovery...")
-        #         restart_audio_stream()
-        #     elif items_queued == 0 and is_still_recording:
-        #         logging.warning("Audio verification WARNING: Callbacks running but no audio queued")
-        # threading.Thread(target=verify_audio_capture, daemon=True).start()
+        # Early audio verification - warn only, no restart
+        def verify_audio_capture():
+            global recording, callback_invocation_count
+            with state_lock:
+                initial_count = callback_invocation_count
+                is_recording = recording
+            initial_queue_size = audio_queue.qsize()
+            time.sleep(1.0)
+            with state_lock:
+                if not recording:
+                    return
+                new_count = callback_invocation_count
+                is_still_recording = recording
+            new_queue_size = audio_queue.qsize()
+            callbacks_received = new_count - initial_count
+            items_queued = new_queue_size - initial_queue_size
+            min_expected_callbacks = 5
+            logging.info(f"Audio verification: {callbacks_received} callbacks, {items_queued} items queued in 1000ms")
+            if callbacks_received < min_expected_callbacks:
+                logging.warning(f"Audio verification FAILED: Only {callbacks_received} callbacks (expected >= {min_expected_callbacks})")
+                stream_active = None
+                with stream_lock:
+                    if stream is not None:
+                        try:
+                            stream_active = stream.active
+                        except Exception:
+                            pass
+                logging.warning(f"Stream active: {stream_active}")
+                show_notification("Dictation Warning", "Audio may not be flowing - try stopping and restarting")
+            elif items_queued == 0 and is_still_recording:
+                logging.warning("Audio verification WARNING: Callbacks running but no audio queued")
+        threading.Thread(target=verify_audio_capture, daemon=True).start()
     else:
         # Stop recording, start transcription - update state under lock
+        # Set transcribing=True atomically with recording=False to prevent
+        # the watchdog from clearing the queue in the gap between states
         with state_lock:
             recording = False
+            transcribing = True
         show_notification("Dictation", "Recording stopped")
         logging.info("Recording stopped, starting transcription thread...")
         threading.Thread(target=transcribe_audio).start()
@@ -522,10 +523,13 @@ def restart_audio_stream():
 
         restart_in_progress = True
 
-        # Check transcribing flag under state_lock BEFORE clearing queue
+        # Check recording/transcribing flags under state_lock BEFORE clearing queue
         with state_lock:
             if transcribing:
                 logging.info("Restart skipped: transcription in progress")
+                return
+            if recording:
+                logging.info("Restart skipped: recording in progress (protecting queued audio)")
                 return
 
         logging.info("Attempting to restart audio stream")
@@ -575,8 +579,7 @@ def restart_audio_stream():
             stream_healthy = True
             update_heartbeat()
 
-        show_notification("Dictation", "Audio system recovered")
-        logging.info("Audio stream successfully restarted")
+        logging.info("Audio stream restarted successfully (silent recovery)")
 
     except Exception as e:
         logging.error(f"Failed to restart audio stream: {e}")
@@ -590,9 +593,10 @@ def restart_audio_stream():
         stream_lock.release()
 
 def update_heartbeat():
-    """Update the heartbeat timestamp"""
+    """Update the heartbeat timestamp under lock for cross-thread visibility"""
     global last_heartbeat
-    last_heartbeat = datetime.now()
+    with state_lock:
+        last_heartbeat = datetime.now()
 
 
 def apply_device_change(old_device_id=None, new_device_id=None):
@@ -820,9 +824,8 @@ def append_bullet_to_file(text):
 # --------------------------------------
 def transcribe_audio():
     global transcribing, append_mode
-    # Set transcribing flag under lock
-    with state_lock:
-        transcribing = True
+    # transcribing already set to True by toggle_recording() before thread spawn
+    # to prevent watchdog from clearing the queue in the gap between states
     transcribe_start_time = datetime.now()
     max_transcribe_time = 60  # seconds before transcription times out
 
