@@ -33,8 +33,72 @@ WORD_MAPPINGS = {
     r'Sora Studios': 'Suora Studios',
     r'Sora': 'Suora',
     r'route':'root',
-    
+    r'\bcolon\b': ':',
+    r'\bColin\b': ':',
 }
+
+# Trigger phrases that cause the following words to be wrapped in quotes
+# Each entry: (trigger regex, whether to keep the trigger phrase in output)
+QUOTE_TRIGGERS = [
+    r'the words?',
+    r'a file called',
+    r'a folder called',
+    r'a function called',
+    r'a variable called',
+    r'a method called',
+    r'a class called',
+    r'a table called',
+    r'a column called',
+    r'called',
+]
+
+# Words that signal the end of the quoted portion
+STOP_WORDS = {
+    'is', 'are', 'was', 'were', 'will', 'would', 'should', 'could', 'can',
+    'has', 'have', 'had', 'do', 'does', 'did',
+    'and', 'or', 'but', 'so', 'then', 'that', 'which', 'where', 'when',
+    'to', 'in', 'on', 'at', 'for', 'from', 'with', 'into', 'about',
+    'it', 'this', 'the', 'a', 'an',
+}
+
+def apply_contextual_quotes(text):
+    """Wrap words following trigger phrases in single quotes."""
+    trigger_pattern = '|'.join(QUOTE_TRIGGERS)
+    # Match trigger phrase followed by one or more words
+    pattern = rf'(?i)\b({trigger_pattern})\s+([^.,;:!?\n]+)'
+
+    def replace_match(m):
+        trigger = m.group(1)
+        rest = m.group(2)
+        # Split into words and find where to stop quoting
+        words = rest.split()
+        quoted = []
+        remainder = []
+        for i, word in enumerate(words):
+            if word.lower().rstrip('.,;:!?') in STOP_WORDS and i > 0:
+                remainder = words[i:]
+                break
+            quoted.append(word)
+        else:
+            remainder = []
+
+        if not quoted:
+            return m.group(0)
+
+        quoted_str = ' '.join(quoted).rstrip('.,;:!?')
+        trailing_punct = ''
+        original_end = ' '.join(quoted).rstrip()
+        if original_end and original_end[-1] in '.,;:!?':
+            trailing_punct = original_end[-1]
+
+        result = f"{trigger} '{quoted_str}'"
+        if trailing_punct:
+            result += trailing_punct
+        if remainder:
+            result += ' ' + ' '.join(remainder)
+        return result
+
+    return re.sub(pattern, replace_match, text)
 
 
 def correct_variations(text, mappings):
@@ -46,8 +110,11 @@ def cleanup_text(text):
     # Correct variations first
     text = correct_variations(text, WORD_MAPPINGS)
 
+    # Apply contextual quoting (before punctuation cleanup)
+    text = apply_contextual_quotes(text)
+
     # Single spaces after punctuation
-    text = re.sub(r'\s*([.,?!])\s*', r'\1 ', text)
+    text = re.sub(r'\s*([.,?!:])\s*', r'\1 ', text)
 
     # Remove extra punctuation before a newline
     text = re.sub(r'[.,]\s*\n', r'\n', text)
