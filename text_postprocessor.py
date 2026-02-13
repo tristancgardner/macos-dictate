@@ -30,6 +30,8 @@ WORD_MAPPINGS = {
     r'Club code': 'Claude-Code',
     r'Clawed code': 'Claude-Code',
     r'Soros': 'Suora',
+    r'Sora Studios': 'Suora Studios',
+    r'Sora': 'Suora',
     r'route':'root',
     
 }
