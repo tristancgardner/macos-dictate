@@ -1,5 +1,30 @@
 # macos-dictate Reliability Log
 
+## 2026-02-13 (evening) -- Packaged as .app, new shortcuts
+
+### Changes
+- Packaged dictate.py as `Dictate.app` using py2app alias mode. App gets its own TCC identity (`com.suorastudios.dictate`) so Accessibility/Input Monitoring/Microphone permissions are stable and won't reset monthly like Terminal.app's do on macOS Sequoia.
+- Added Alt+F1 shortcut to append transcription as bullet to bizdev TODO (`__TODO_MASTER.md`). Refactored `append_mode` boolean to `append_target` path variable so multiple append shortcuts can route to different files.
+- Fixed pre-existing bug: F2 repaste failed with `'ascii' codec can't decode byte 0xe6` because `open(LOG_FILE, 'r')` didn't specify `encoding='utf-8'`. The .app process environment defaults to ASCII instead of Terminal's UTF-8.
+- Added custom app icon (`Dictate.icns`).
+- Created `rebuild.sh` script that handles full rebuild + TCC reset + opens System Settings pages for re-authorization.
+
+### Architecture notes
+- Alias mode: the .app bundle symlinks back to source files and venv. Code changes are live with just a quit+relaunch (Option+Shift+D). Only `setup.py` changes require a rebuild.
+- Rebuilds (`rm -rf dist`) invalidate macOS TCC permissions because the code signature hash changes. Must remove and re-add the app in Accessibility + Input Monitoring after rebuild.
+- `LSUIElement: true` means no dock icon when running, no menu bar. User can drag .app to Dock as a launcher.
+- Login Item: added via System Settings > General > Login Items.
+
+### Current shortcut map
+- F1: record and paste transcription
+- F2: repaste last transcription
+- Cmd+F1: record and append as bullet to Somni TODO (from APPEND_BULLET_FILE in .env.local)
+- Alt+F1: record and append as bullet to bizdev TODO
+- Option+Shift+D: quit
+
+### Status
+- All shortcuts tested and working from .app bundle.
+
 ## 2026-02-13
 - Disabling early audio verification (02-12) didn't help -- may have made things worse. "Audio system recovered" notifications still appearing, "no audio recorded" errors persist.
 - Root cause identified: race condition in queue clearing. When recording stops, there's a window where both recording=False and transcribing=False. Watchdog can clear the queue in that gap, destroying all captured audio before transcription drains it. Also, restart_audio_stream() never checked if recording was active before clearing.

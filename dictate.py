@@ -60,7 +60,7 @@ audio_timeout = 5  # seconds before we consider audio system stalled
 device_monitor = None  # CoreAudio device change monitor
 last_polled_device_name = None  # For polling fallback
 callback_invocation_count = 0  # Track audio callback invocations for diagnostics
-append_mode = False  # When True, transcription appends as bullet to markdown file
+append_target = None  # When set, transcription appends as bullet to this file path
 
 # Load .env.local for custom shortcut config (e.g. APPEND_BULLET_FILE path)
 ENV_LOCAL_FILE = Path(__file__).parent / '.env.local'
@@ -155,15 +155,22 @@ def tap_callback(proxy, type_, event, refcon):
     keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
     flags = Quartz.CGEventGetFlags(event)
 
-    # Cmd+F1 => Start recording in append-to-file mode
+    # Cmd+F1 => Append to APPEND_BULLET_FILE (from .env.local)
+    # Alt+F1 => Append to bizdev TODO
     # Plain F1 => Toggle recording (also stops append-mode recording)
     if keycode == 122:  # F1
         cmd_pressed = (flags & Quartz.kCGEventFlagMaskCommand) == Quartz.kCGEventFlagMaskCommand
+        alt_pressed = (flags & Quartz.kCGEventFlagMaskAlternate) == Quartz.kCGEventFlagMaskAlternate
+        global append_target
         if cmd_pressed and APPEND_BULLET_FILE:
-            global append_mode
-            append_mode = True
+            append_target = APPEND_BULLET_FILE
             logging.info("Cmd+F1 detected: append-to-file mode activated.")
             show_notification("Dictation", "Recording for TODO append...")
+            toggle_recording()
+        elif alt_pressed:
+            append_target = '/Users/tristangardner/Documents/Programming/01_Apps/bizdev/__TODO_MASTER.md'
+            logging.info("Alt+F1 detected: append to bizdev TODO.")
+            show_notification("Dictation", "Recording for bizdev TODO...")
             toggle_recording()
         else:
             logging.info("F1 key detected.")
@@ -387,7 +394,7 @@ def repaste_last_transcription():
             return
 
         # Read log file and search backwards for most recent transcription
-        with open(LOG_FILE, 'r') as f:
+        with open(LOG_FILE, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
         # Search backwards for "Cleaned transcribed text:"
@@ -788,9 +795,9 @@ def show_notification(title, message):
 # --------------------------------------
 # Append transcription as bullet to markdown file
 # --------------------------------------
-def append_bullet_to_file(text):
-    """Append text as a bullet point to the configured markdown file."""
-    target = Path(APPEND_BULLET_FILE)
+def append_bullet_to_file(text, file_path=None):
+    """Append text as a bullet point to the specified markdown file."""
+    target = Path(file_path or APPEND_BULLET_FILE)
     try:
         # Ensure parent directory exists
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -823,7 +830,7 @@ def append_bullet_to_file(text):
 # Transcribe audio (runs in a thread)
 # --------------------------------------
 def transcribe_audio():
-    global transcribing, append_mode
+    global transcribing, append_target
     # transcribing already set to True by toggle_recording() before thread spawn
     # to prevent watchdog from clearing the queue in the gap between states
     transcribe_start_time = datetime.now()
@@ -913,8 +920,8 @@ def transcribe_audio():
 
         if text:
             # Check if we're in append-to-file mode
-            if append_mode and APPEND_BULLET_FILE:
-                append_bullet_to_file(text)
+            if append_target:
+                append_bullet_to_file(text, append_target)
             else:
                 send_text_to_active_app(text + " ")
         else:
@@ -927,8 +934,8 @@ def transcribe_audio():
         show_notification("Dictation Error", "Transcription error")
 
     finally:
-        # Clear transcribing and append_mode flags under lock
-        append_mode = False
+        # Clear transcribing and append_target flags under lock
+        append_target = None
         with state_lock:
             transcribing = False
 
