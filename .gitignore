@@ -7,3 +7,5 @@ PID_process_cleanup_notes.md
 test_event_tap.py
 .vscode/
 .env.local
+build/
+dist/

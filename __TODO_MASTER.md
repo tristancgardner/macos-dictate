@@ -1,0 +1,1 @@
+- Let's do another shortcut, Alt F1, for adding a note to my biz dev to-do list.
