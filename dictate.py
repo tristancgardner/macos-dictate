@@ -52,6 +52,7 @@ def parse_arguments():
 audio_queue = queue.Queue()
 recording = False
 transcribing = False
+transcribe_start = None  # When transcription started (for watchdog timeout detection)
 stream = None
 last_heartbeat = datetime.now()
 stream_healthy = False
@@ -61,6 +62,8 @@ device_monitor = None  # CoreAudio device change monitor
 last_polled_device_name = None  # For polling fallback
 callback_invocation_count = 0  # Track audio callback invocations for diagnostics
 append_target = None  # When set, transcription appends as bullet to this file path
+stall_recovery_count = 0  # Consecutive stall recoveries without successful recording
+MAX_STALL_RETRIES = 3  # Max consecutive stall recoveries before giving up
 
 # Load .env.local for custom shortcut config (e.g. APPEND_BULLET_FILE path)
 ENV_LOCAL_FILE = Path(__file__).parent / '.env.local'
@@ -254,7 +257,7 @@ def toggle_recording():
     - If currently recording => Stop & transcribe
     - If transcribing => ignore
     """
-    global recording, transcribing, stream, stream_healthy
+    global recording, transcribing, stream, stream_healthy, transcribe_start
 
     # Check state under lock to avoid race conditions
     with state_lock:
@@ -333,9 +336,11 @@ def toggle_recording():
                     return  # Exit without setting recording=True
 
         # Start recording with the stream - update state under lock
+        global stall_recovery_count
         with state_lock:
             recording = True
             update_heartbeat()  # Reset heartbeat timer
+        stall_recovery_count = 0  # Reset stall counter on successful recording start
         show_notification("Dictation", "Recording started")
         logging.info("Recording started...")
 
@@ -378,6 +383,7 @@ def toggle_recording():
         with state_lock:
             recording = False
             transcribing = True
+            transcribe_start = datetime.now()
         show_notification("Dictation", "Recording stopped")
         logging.info("Recording stopped, starting transcription thread...")
         threading.Thread(target=transcribe_audio).start()
@@ -419,7 +425,7 @@ def repaste_last_transcription():
 # Watchdog function to monitor system health
 # --------------------------------------
 def watchdog_monitor():
-    global watchdog_active, stream, stream_healthy, last_polled_device_name
+    global watchdog_active, stream, stream_healthy, last_polled_device_name, stall_recovery_count, transcribing, transcribe_start, append_target, recording
 
     logging.info("Watchdog thread started")
 
@@ -434,6 +440,7 @@ def watchdog_monitor():
                 is_transcribing = transcribing
                 heartbeat_copy = last_heartbeat
                 callback_count_copy = callback_invocation_count
+                transcribe_start_copy = transcribe_start
 
             # Check if audio stream is healthy when recording
             if is_recording:
@@ -463,10 +470,34 @@ def watchdog_monitor():
                             except Exception:
                                 pass
                     logging.warning(f"Stream state: active={stream_active}, queue_size={audio_queue.qsize()}")
-                    show_notification("Dictation Error", "Audio system stalled, recovering...")
 
-                    # Force restart the audio stream
-                    restart_audio_stream()
+                    # Clear recording flag so restart_audio_stream won't skip
+                    # (audio is dead anyway, nothing to protect)
+                    with state_lock:
+                        recording = False
+                        last_heartbeat = datetime.now()  # prevent re-trigger during restart
+
+                    # Cap stall recovery attempts to prevent infinite loop
+                    stall_recovery_count += 1
+                    if stall_recovery_count > MAX_STALL_RETRIES:
+                        logging.error(f"Stall recovery failed {stall_recovery_count} times, giving up. User must restart.")
+                        show_notification("Dictation Error", "Audio system unresponsive. Please restart the app.")
+                        # Stop retrying - just idle until user restarts
+                        continue
+                    else:
+                        show_notification("Dictation Error", f"Audio stalled, recovering (attempt {stall_recovery_count}/{MAX_STALL_RETRIES})...")
+                        restart_audio_stream()
+
+            # Detect stuck transcription (transcribing=True for way too long)
+            if is_transcribing and transcribe_start_copy is not None:
+                transcribe_elapsed = (datetime.now() - transcribe_start_copy).total_seconds()
+                if transcribe_elapsed > 90:  # 60s timeout + 30s grace
+                    logging.error(f"Transcription stuck for {transcribe_elapsed:.0f}s, force-clearing state")
+                    with state_lock:
+                        transcribing = False
+                        transcribe_start = None
+                        append_target = None
+                    show_notification("Dictation Error", "Transcription timed out, ready for new recording")
 
             # Periodically check sounddevice status when not recording
             elif not is_recording and not is_transcribing:
@@ -830,7 +861,7 @@ def append_bullet_to_file(text, file_path=None):
 # Transcribe audio (runs in a thread)
 # --------------------------------------
 def transcribe_audio():
-    global transcribing, append_target
+    global transcribing, append_target, transcribe_start
     # transcribing already set to True by toggle_recording() before thread spawn
     # to prevent watchdog from clearing the queue in the gap between states
     transcribe_start_time = datetime.now()
@@ -935,9 +966,10 @@ def transcribe_audio():
 
     finally:
         # Clear transcribing and append_target flags under lock
-        append_target = None
         with state_lock:
             transcribing = False
+            transcribe_start = None
+            append_target = None
 
 # --------------------------------------
 # Test microphone access
