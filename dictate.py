@@ -108,7 +108,7 @@ def setup_lock_file():
                     try:
                         proc = psutil.Process(old_pid)
                         cmdline = ' '.join(proc.cmdline())
-                        if 'dictate.py' in cmdline:
+                        if 'dictate.py' in cmdline or 'Dictate.app' in cmdline:
                             # Old instance exists - kill it instead of exiting
                             logging.info(f"Killing stale instance with PID {old_pid}")
                             os.kill(old_pid, signal.SIGKILL)
@@ -133,7 +133,7 @@ def cleanup_lock_file():
 # --------------------------------------
 def kill_old_processes():
     try:
-        result = subprocess.check_output(["pgrep", "-f", "dictate.py"]).decode().splitlines()
+        result = subprocess.check_output(["pgrep", "-f", "dictate.py|Dictate.app"]).decode().splitlines()
         current_pid = os.getpid()
         killed_any = False
         for pid in result:
@@ -425,7 +425,7 @@ def repaste_last_transcription():
 # Watchdog function to monitor system health
 # --------------------------------------
 def watchdog_monitor():
-    global watchdog_active, stream, stream_healthy, last_polled_device_name, stall_recovery_count, transcribing, transcribe_start, append_target, recording
+    global watchdog_active, stream, stream_healthy, last_polled_device_name, stall_recovery_count, transcribing, transcribe_start, append_target, recording, last_heartbeat
 
     logging.info("Watchdog thread started")
 
@@ -1106,10 +1106,22 @@ if __name__ == "__main__":
         ready_msg += ")"
         show_notification("Dictation", ready_msg)
     
-        # Keep main thread alive
+        # Keep main thread alive, but exit if critical threads die
         try:
+            consecutive_failures = 0
+            MAX_WATCHDOG_FAILURES = 10  # Exit after watchdog is dead for ~10 seconds
             while True:
                 time.sleep(1)
+                # Check if watchdog thread is still alive
+                if not watchdog_thread.is_alive():
+                    consecutive_failures += 1
+                    if consecutive_failures >= MAX_WATCHDOG_FAILURES:
+                        logging.error("Watchdog thread dead for too long, exiting for clean relaunch")
+                        show_notification("Dictation Error", "App crashed, please relaunch")
+                        cleanup_lock_file()
+                        os._exit(1)
+                else:
+                    consecutive_failures = 0
         except KeyboardInterrupt:
             logging.info("KeyboardInterrupt: Exiting...")
             watchdog_active = False
