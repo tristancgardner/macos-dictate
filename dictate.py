@@ -190,9 +190,45 @@ def tap_callback(proxy, type_, event, refcon):
     if type_ == Quartz.kCGEventKeyDown and keycode == 2:  # 'D'
         shift_pressed = (flags & Quartz.kCGEventFlagMaskShift) == Quartz.kCGEventFlagMaskShift
         option_pressed = (flags & Quartz.kCGEventFlagMaskAlternate) == Quartz.kCGEventFlagMaskAlternate
-        
+        cmd_pressed = (flags & Quartz.kCGEventFlagMaskCommand) == Quartz.kCGEventFlagMaskCommand
+
         if shift_pressed and option_pressed:
             logging.info("Option+Shift+D detected. Exiting.")
+            cleanup_lock_file()
+            os._exit(0)
+
+    # Cmd+Alt+R => Force restart (kill and relaunch)
+    if type_ == Quartz.kCGEventKeyDown and keycode == 15:  # 'R'
+        cmd_pressed = (flags & Quartz.kCGEventFlagMaskCommand) == Quartz.kCGEventFlagMaskCommand
+        alt_pressed = (flags & Quartz.kCGEventFlagMaskAlternate) == Quartz.kCGEventFlagMaskAlternate
+
+        if cmd_pressed and alt_pressed:
+            logging.info("Cmd+Alt+R detected. Force restarting app...")
+            show_notification("Dictation", "Restarting...")
+            # Launch new instance in background, then exit this one
+            try:
+                # Detect if running from .app bundle by checking if path contains .app/Contents/
+                current_path = os.path.abspath(sys.executable)
+                if '.app/Contents/' in current_path:
+                    # Extract bundle path from executable path
+                    # Example: /path/to/Dictate.app/Contents/MacOS/Dictate -> /path/to/Dictate.app
+                    bundle_path = current_path.split('.app/Contents/')[0] + '.app'
+                    logging.info(f"Relaunching .app bundle: {bundle_path}")
+                    subprocess.Popen(['open', '-n', bundle_path],
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+                else:
+                    # Running from source (python script)
+                    script_path = os.path.abspath(__file__)
+                    logging.info(f"Relaunching Python script: {script_path}")
+                    subprocess.Popen([sys.executable, script_path],
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+
+                time.sleep(0.5)  # Give new instance time to start
+            except Exception as e:
+                logging.error(f"Failed to relaunch: {e}")
+
             cleanup_lock_file()
             os._exit(0)
     
@@ -523,15 +559,18 @@ def watchdog_monitor():
             if poll_counter >= DEVICE_POLL_INTERVAL and not is_recording and not is_transcribing:
                 poll_counter = 0
                 try:
-                    # Refresh and check current default device
-                    refresh_sounddevice()
+                    # Check current default device WITHOUT refreshing first
+                    # Only refresh if we detect a change
                     current_device_name = get_current_default_device_name()
 
                     if last_polled_device_name is not None and current_device_name != last_polled_device_name:
                         logging.info(f"Polling detected device change: {last_polled_device_name} -> {current_device_name}")
+                        # NOW refresh sounddevice cache to pick up the new device
+                        refresh_sounddevice()
                         apply_device_change()
-                    else:
-                        last_polled_device_name = current_device_name
+
+                    # Update baseline (do this regardless of whether change was detected)
+                    last_polled_device_name = current_device_name
 
                 except Exception as e:
                     logging.warning(f"Device polling error: {e}")
@@ -867,6 +906,8 @@ def transcribe_audio():
     transcribe_start_time = datetime.now()
     max_transcribe_time = 60  # seconds before transcription times out
 
+    logging.info(f"Transcription started at {transcribe_start_time}")
+
     try:
         # Gather audio from the queue
         audio_data = []
@@ -943,6 +984,9 @@ def transcribe_audio():
             
         # Process the transcription result
         result = result_container["result"]
+        transcribe_elapsed = (datetime.now() - transcribe_start_time).total_seconds()
+        logging.info(f"Whisper transcription completed in {transcribe_elapsed:.2f}s")
+
         text = result['text'].strip()
         logging.info(f"Raw transcribed text: '{text}'")
 

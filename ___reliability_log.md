@@ -1,5 +1,31 @@
 # macos-dictate Reliability Log
 
+## 2026-02-16 -- Fixed infinite refresh loop and added restart shortcut
+
+### Changes
+- **CRITICAL FIX**: Fixed infinite `refresh_sounddevice()` loop that was causing app freezes. The watchdog polling fallback was refreshing PortAudio every 5 seconds regardless of whether the device changed. Now it only refreshes AFTER detecting an actual device change.
+- Added Cmd+Alt+R keyboard shortcut to force-restart the app when it freezes or becomes unresponsive.
+- Added transcription timing logs to track performance and identify slowdowns.
+
+### Root cause of freeze
+The polling fallback (lines 522-537) was calling `refresh_sounddevice()` → `sd._terminate()` + `sd._initialize()` every 5 seconds when idle. This constant PortAudio reinitialization was:
+1. Causing the app to freeze/become unresponsive
+2. Likely causing the perceived slowdown in processing time
+3. Spamming the log with "Sounddevice/PortAudio device cache refreshed" messages
+
+### Fix
+Moved `refresh_sounddevice()` to only be called AFTER detecting a device name change, not on every poll cycle. The polling now:
+1. Checks current device name WITHOUT refreshing
+2. Compares to baseline
+3. Only refreshes + applies change if names differ
+
+### Performance notes
+With the constant refresh loop fixed, transcription performance should return to pre-.app packaging levels. Added timing logs (`transcription completed in X.XXs`) to monitor this going forward.
+
+### Status
+- **TESTED & WORKING** - User confirmed fix is working after relaunch. App no longer freezing, Cmd+Alt+R restart shortcut functional.
+- Monitoring for: performance improvements, absence of freeze issues, transcription timing logs.
+
 ## 2026-02-13 (evening) -- Packaged as .app, new shortcuts
 
 ### Changes
