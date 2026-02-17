@@ -25,7 +25,9 @@ With the constant refresh loop fixed, transcription performance should return to
 ### Status
 - **TESTED & WORKING** - User confirmed fix is working after relaunch. App no longer freezing, Cmd+Alt+R restart shortcut functional.
 - Monitoring for: performance improvements, absence of freeze issues, transcription timing logs.
-- **UPDATE 2026-02-16 (evening)**: User reported garbled transcriptions. Upgraded default model from `base` to `small` for better accuracy. Expected transcription time increase: 2-5s → 5-10s.
+- **UPDATE 2026-02-16 (evening)**: User reported garbled transcriptions. Upgraded default model from `base` to `small` for better accuracy.
+- **TURBO MODEL FAILURE 2026-02-16 (late)**: Attempted `turbo` model - DISASTER. 7-word transcriptions took 46-51 seconds (vs expected 2-5s). Turbo appears incompatible with Apple Silicon or has severe performance issues. Reverted to `small` model.
+- **PERFORMANCE FIX 2026-02-16 (late)**: User confirmed .app is slower than terminal for base/small models. Added `NSAppSleepDisabled: True` and `NSSupportsAutomaticGraphicsSwitching: False` to plist to disable App Nap and force performance cores. Testing with `small` model to isolate whether plist changes help (turbo failure was unrelated).
 
 ## 2026-02-13 (evening) -- Packaged as .app, new shortcuts
 

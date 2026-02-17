@@ -21,6 +21,8 @@ OPTIONS = {
         'CFBundleShortVersionString': '1.0.0',
         'LSUIElement': True,  # No dock icon
         'NSMicrophoneUsageDescription': 'Dictate needs microphone access to transcribe speech.',
+        'NSAppSleepDisabled': True,  # Disable App Nap to prevent CPU throttling
+        'NSSupportsAutomaticGraphicsSwitching': False,  # Force high-performance GPU/cores
     },
     'packages': [
         'whisper',
