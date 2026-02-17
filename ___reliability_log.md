@@ -25,6 +25,7 @@ With the constant refresh loop fixed, transcription performance should return to
 ### Status
 - **TESTED & WORKING** - User confirmed fix is working after relaunch. App no longer freezing, Cmd+Alt+R restart shortcut functional.
 - Monitoring for: performance improvements, absence of freeze issues, transcription timing logs.
+- **UPDATE 2026-02-16 (evening)**: User reported garbled transcriptions. Upgraded default model from `base` to `small` for better accuracy. Expected transcription time increase: 2-5s → 5-10s.
 
 ## 2026-02-13 (evening) -- Packaged as .app, new shortcuts
 

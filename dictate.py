@@ -34,7 +34,7 @@ def parse_arguments():
     parser.add_argument(
         '--model',
         type=str,
-        default='base',
+        default='small',
         choices=['tiny', 'base', 'small', 'medium', 'large'],
         help='Choose the Whisper model size.'
     )
