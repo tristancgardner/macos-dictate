@@ -1,9 +1,12 @@
+import os
+os.environ.setdefault('OMP_NUM_THREADS', '8')
+os.environ.setdefault('MKL_NUM_THREADS', '8')
+
 import whisper
 import sounddevice as sd
 import numpy as np
 import threading
 import queue
-import os
 import time
 import argparse
 import sys
@@ -204,7 +207,7 @@ def tap_callback(proxy, type_, event, refcon):
 
         if cmd_pressed and alt_pressed:
             logging.info("Cmd+Alt+R detected. Force restarting app...")
-            show_notification("Dictation", "Restarting...")
+            show_notification("Dictation", "Restarting Dictation App...")
             # Launch new instance in background, then exit this one
             try:
                 # Detect if running from .app bundle by checking if path contains .app/Contents/
