@@ -44,6 +44,11 @@ OPTIONS = {
         'AppKit',
         'text_postprocessor',
         'device_monitor',
+        'audio',
+        'transcription',
+        'watchdog',
+        'keyboard',
+        'process',
     ],
 }
 

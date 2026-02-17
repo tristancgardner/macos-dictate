@@ -1,34 +1,41 @@
 import os
-os.environ.setdefault('OMP_NUM_THREADS', '8')
-os.environ.setdefault('MKL_NUM_THREADS', '8')
+os.environ['OMP_NUM_THREADS'] = '8'
+os.environ['MKL_NUM_THREADS'] = '8'
+
+import torch
+torch.set_num_threads(8)
+torch.set_num_interop_threads(4)
 
 import whisper
 import sounddevice as sd
-import numpy as np
 import threading
-import queue
 import time
 import argparse
 import sys
-import Quartz
-import AppKit  # PyObjC library
-import subprocess
+import AppKit
 import logging
-from pathlib import Path
-import re
-import psutil
+import traceback
 import atexit
 import signal
-import traceback
-import random
+from pathlib import Path
 from datetime import datetime
 
-from pathlib import Path
 src_dir = Path(__file__).parent
 project_root = src_dir.parent
 sys.path.insert(0, str(src_dir))
-from text_postprocessor import cleanup_text, send_text_to_active_app
-from device_monitor import DeviceMonitor, refresh_sounddevice, get_current_default_device_name, COREAUDIO_AVAILABLE
+
+from process import show_notification, setup_lock_file, cleanup_lock_file, kill_old_processes
+from audio import (
+    audio_queue, state_lock, stream_lock,
+    audio_callback, select_input_device, test_microphone_access,
+    get_current_output_device, restore_output_device, update_heartbeat,
+)
+import audio
+import transcription
+import watchdog as watchdog_mod
+from keyboard import event_tap_ready, event_tap_failed, run_event_tap
+import keyboard as keyboard_mod
+from device_monitor import DeviceMonitor
 
 # --------------------------------------
 # Command-line argument parsing
@@ -51,25 +58,8 @@ def parse_arguments():
     return parser.parse_args()
 
 # --------------------------------------
-# Global variables
+# Load .env.local
 # --------------------------------------
-audio_queue = queue.Queue()
-recording = False
-transcribing = False
-transcribe_start = None  # When transcription started (for watchdog timeout detection)
-stream = None
-last_heartbeat = datetime.now()
-stream_healthy = False
-watchdog_active = True
-audio_timeout = 5  # seconds before we consider audio system stalled
-device_monitor = None  # CoreAudio device change monitor
-last_polled_device_name = None  # For polling fallback
-callback_invocation_count = 0  # Track audio callback invocations for diagnostics
-append_target = None  # When set, transcription appends as bullet to this file path
-stall_recovery_count = 0  # Consecutive stall recoveries without successful recording
-MAX_STALL_RETRIES = 3  # Max consecutive stall recoveries before giving up
-
-# Load .env.local for custom shortcut config (e.g. APPEND_BULLET_FILE path)
 ENV_LOCAL_FILE = project_root / '.env.local'
 if ENV_LOCAL_FILE.exists():
     with open(ENV_LOCAL_FILE, 'r') as f:
@@ -82,212 +72,12 @@ if ENV_LOCAL_FILE.exists():
 APPEND_BULLET_FILE = os.environ.get('APPEND_BULLET_FILE')
 APPEND_BULLET_FILE_2 = os.environ.get('APPEND_BULLET_FILE_2')
 
-# Thread synchronization primitives
-state_lock = threading.RLock()   # Protects: recording, transcribing, stream_healthy, last_heartbeat, callback_count
-stream_lock = threading.Lock()    # Protects: stream object, restart operations
-restart_in_progress = False       # Prevents concurrent restarts
-
-# Event tap status - signals main thread if event tap fails
-event_tap_ready = threading.Event()
-event_tap_failed = threading.Event()
-
 LOG_FILE = Path.home() / '.dictate.log'
 logging.basicConfig(
     filename=str(LOG_FILE),
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
-
-LOCK_FILE = "/tmp/dictate.lock"
-
-# --------------------------------------
-# Lock-file handling
-# --------------------------------------
-def setup_lock_file():
-    if os.path.exists(LOCK_FILE):
-        try:
-            with open(LOCK_FILE, "r") as f:
-                old_pid = int(f.read().strip())
-                # Check if the old process is actually running dictate.py
-                if psutil.pid_exists(old_pid):
-                    try:
-                        proc = psutil.Process(old_pid)
-                        cmdline = ' '.join(proc.cmdline())
-                        if 'dictate.py' in cmdline or 'Dictate.app' in cmdline:
-                            # Old instance exists - kill it instead of exiting
-                            logging.info(f"Killing stale instance with PID {old_pid}")
-                            os.kill(old_pid, signal.SIGKILL)
-                            time.sleep(0.3)
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-        except (ValueError, IOError):
-            # Lock file is corrupted or unreadable, just overwrite it
-            pass
-
-    with open(LOCK_FILE, "w") as f:
-        f.write(str(os.getpid()))
-
-def cleanup_lock_file():
-    if os.path.exists(LOCK_FILE):
-        os.remove(LOCK_FILE)
-        print("Lock file removed.")
-
-# --------------------------------------
-# (Optional) Kill old processes
-# Comment out if you suspect concurrency issues
-# --------------------------------------
-def kill_old_processes():
-    try:
-        result = subprocess.check_output(["pgrep", "-f", "dictate.py|Dictate.app"]).decode().splitlines()
-        current_pid = os.getpid()
-        killed_any = False
-        for pid in result:
-            if int(pid) != current_pid:  # Skip the current process
-                logging.info(f"Killing old process with PID {pid}")
-                try:
-                    os.kill(int(pid), signal.SIGKILL)  # Use SIGKILL for immediate termination
-                    killed_any = True
-                except ProcessLookupError:
-                    logging.info(f"Process {pid} already dead")
-                except PermissionError:
-                    logging.warning(f"Permission denied killing process {pid}")
-        if killed_any:
-            logging.info("Waiting for old processes to terminate...")
-    except subprocess.CalledProcessError:
-        logging.info("No old processes found to kill.")
-
-# --------------------------------------
-# Event tap callback
-# --------------------------------------
-def tap_callback(proxy, type_, event, refcon):
-    keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
-    flags = Quartz.CGEventGetFlags(event)
-
-    # Cmd+F1 => Append to APPEND_BULLET_FILE (from .env.local)
-    # Alt+F1 => Append to bizdev TODO
-    # Plain F1 => Toggle recording (also stops append-mode recording)
-    if keycode == 122:  # F1
-        cmd_pressed = (flags & Quartz.kCGEventFlagMaskCommand) == Quartz.kCGEventFlagMaskCommand
-        alt_pressed = (flags & Quartz.kCGEventFlagMaskAlternate) == Quartz.kCGEventFlagMaskAlternate
-        global append_target
-        if cmd_pressed and APPEND_BULLET_FILE:
-            append_target = APPEND_BULLET_FILE
-            logging.info("Cmd+F1 detected: append-to-file mode activated.")
-            show_notification("Dictation", "Recording for TODO append...")
-            toggle_recording()
-        elif alt_pressed and APPEND_BULLET_FILE_2:
-            append_target = APPEND_BULLET_FILE_2
-            logging.info("Alt+F1 detected: append to secondary TODO file.")
-            show_notification("Dictation", "Recording for secondary TODO...")
-            toggle_recording()
-        else:
-            logging.info("F1 key detected.")
-            toggle_recording()
-        return None  # Suppress the F1 keystroke so it won't pass through
-
-    # F2 key => Repaste last transcription
-    if keycode == 120:  # F2
-        logging.info("F2 key detected.")
-        repaste_last_transcription()
-        return None  # Suppress the F2 keystroke so it won't pass through
-
-    # Option+Shift+D => Quit
-    if type_ == Quartz.kCGEventKeyDown and keycode == 2:  # 'D'
-        shift_pressed = (flags & Quartz.kCGEventFlagMaskShift) == Quartz.kCGEventFlagMaskShift
-        option_pressed = (flags & Quartz.kCGEventFlagMaskAlternate) == Quartz.kCGEventFlagMaskAlternate
-        cmd_pressed = (flags & Quartz.kCGEventFlagMaskCommand) == Quartz.kCGEventFlagMaskCommand
-
-        if shift_pressed and option_pressed:
-            logging.info("Option+Shift+D detected. Exiting.")
-            cleanup_lock_file()
-            os._exit(0)
-
-    # Cmd+Alt+R => Force restart (kill and relaunch)
-    if type_ == Quartz.kCGEventKeyDown and keycode == 15:  # 'R'
-        cmd_pressed = (flags & Quartz.kCGEventFlagMaskCommand) == Quartz.kCGEventFlagMaskCommand
-        alt_pressed = (flags & Quartz.kCGEventFlagMaskAlternate) == Quartz.kCGEventFlagMaskAlternate
-
-        if cmd_pressed and alt_pressed:
-            logging.info("Cmd+Alt+R detected. Force restarting app...")
-            show_notification("Dictation", "Restarting Dictation App...")
-            # Launch new instance in background, then exit this one
-            try:
-                # Detect if running from .app bundle by checking if path contains .app/Contents/
-                current_path = os.path.abspath(sys.executable)
-                if '.app/Contents/' in current_path:
-                    # Extract bundle path from executable path
-                    # Example: /path/to/Dictate.app/Contents/MacOS/Dictate -> /path/to/Dictate.app
-                    bundle_path = current_path.split('.app/Contents/')[0] + '.app'
-                    logging.info(f"Relaunching .app bundle: {bundle_path}")
-                    subprocess.Popen(['open', '-n', bundle_path],
-                                   stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL)
-                else:
-                    # Running from source (python script)
-                    script_path = os.path.abspath(__file__)
-                    logging.info(f"Relaunching Python script: {script_path}")
-                    subprocess.Popen([sys.executable, script_path],
-                                   stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL)
-
-                time.sleep(0.5)  # Give new instance time to start
-            except Exception as e:
-                logging.error(f"Failed to relaunch: {e}")
-
-            cleanup_lock_file()
-            os._exit(0)
-    
-    return event
-
-# --------------------------------------
-# Run the event tap in a separate thread
-# --------------------------------------
-def run_event_tap():
-    event_mask = Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown)
-    tap = Quartz.CGEventTapCreate(
-        Quartz.kCGSessionEventTap,
-        Quartz.kCGHeadInsertEventTap,
-        Quartz.kCGEventTapOptionDefault,
-        event_mask,
-        tap_callback,
-        None
-    )
-    if not tap:
-        logging.error("Failed to create event tap. Check Accessibility permissions.")
-        event_tap_failed.set()  # Signal main thread that event tap failed
-        return  # Don't call sys.exit() - it doesn't work in daemon threads
-
-    run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
-    Quartz.CFRunLoopAddSource(
-        Quartz.CFRunLoopGetCurrent(),
-        run_loop_source,
-        Quartz.kCFRunLoopCommonModes
-    )
-    Quartz.CGEventTapEnable(tap, True)
-    logging.info("Event tap started successfully.")
-    event_tap_ready.set()  # Signal main thread that event tap is ready
-    Quartz.CFRunLoopRun()
-
-# --------------------------------------
-# Audio callback
-# --------------------------------------
-def audio_callback(indata, frames, time_info, status):
-    global callback_invocation_count
-    try:
-        if status:
-            logging.warning(f"Audio callback status: {status}")
-
-        callback_invocation_count += 1
-
-        if recording:
-            audio_queue.put(indata.copy())
-
-        # Update heartbeat regardless of recording status
-        # This shows the audio system is active
-        update_heartbeat()
-    except Exception as e:
-        logging.error(f"Error in audio callback: {e}")
-        logging.error(traceback.format_exc())
 
 # --------------------------------------
 # Toggle recording function
@@ -298,26 +88,20 @@ def toggle_recording():
     - If currently recording => Stop & transcribe
     - If transcribing => ignore
     """
-    global recording, transcribing, stream, stream_healthy, transcribe_start
-
-    # Check state under lock to avoid race conditions
     with state_lock:
-        if transcribing:
+        if transcription.transcribing:
             logging.info("Ignored toggle: transcription in progress.")
             show_notification("Dictation", "Please wait, transcribing...")
             return
-        is_recording = recording
+        is_recording = audio.recording
 
     if not is_recording:
-        # Check if we need to create a new stream or use existing one
         stream_needs_restart = True
 
-        # Check if stream exists and is valid - use stream_lock for safe access
         with stream_lock:
-            if stream is not None:
+            if audio.stream is not None:
                 try:
-                    # Test if stream is active by checking if it's stopped
-                    if stream.active:
+                    if audio.stream.active:
                         stream_needs_restart = False
                         logging.info("Using existing active stream")
                     else:
@@ -326,17 +110,14 @@ def toggle_recording():
                     logging.warning(f"Error checking stream status: {e}")
                     stream_needs_restart = True
 
-            # Restart stream if needed (still inside stream_lock)
             if stream_needs_restart:
                 try:
-                    # Save current output device before any audio changes
                     saved_output_device = get_current_output_device()
 
-                    # Close old stream if it exists
-                    if stream is not None:
+                    if audio.stream is not None:
                         try:
-                            stream.stop()
-                            stream.close()
+                            audio.stream.stop()
+                            audio.stream.close()
                         except Exception as e:
                             logging.warning(f"Error stopping previous stream: {e}")
 
@@ -344,28 +125,25 @@ def toggle_recording():
                     device_name = sd.query_devices(device_index)['name']
                     logging.info(f"Using input device: {device_name}")
 
-                    # Clear any old data from the queue
                     while not audio_queue.empty():
                         audio_queue.get()
 
-                    stream = sd.InputStream(
+                    audio.stream = sd.InputStream(
                         callback=audio_callback,
                         channels=1,
                         samplerate=16000,
                         device=device_index
                     )
-                    stream.start()
+                    audio.stream.start()
 
-                    # Restore output device if it was changed
                     if saved_output_device:
                         restore_output_device(saved_output_device)
 
-                    # Verify stream started correctly
-                    if not stream.active:
+                    if not audio.stream.active:
                         raise RuntimeError("Stream failed to start")
 
                     with state_lock:
-                        stream_healthy = True
+                        audio.stream_healthy = True
                         update_heartbeat()
 
                 except Exception as e:
@@ -373,31 +151,26 @@ def toggle_recording():
                     logging.error(traceback.format_exc())
                     show_notification("Dictation Error", "Failed to start recording")
                     with state_lock:
-                        stream_healthy = False
-                    return  # Exit without setting recording=True
+                        audio.stream_healthy = False
+                    return
 
-        # Start recording with the stream - update state under lock
-        global stall_recovery_count
         with state_lock:
-            recording = True
-            update_heartbeat()  # Reset heartbeat timer
-        stall_recovery_count = 0  # Reset stall counter on successful recording start
+            audio.recording = True
+            update_heartbeat()
+        watchdog_mod.stall_recovery_count = 0
         show_notification("Dictation", "Recording started")
         logging.info("Recording started...")
 
-        # Early audio verification - warn only, no restart
         def verify_audio_capture():
-            global recording, callback_invocation_count
             with state_lock:
-                initial_count = callback_invocation_count
-                is_recording = recording
+                initial_count = audio.callback_invocation_count
             initial_queue_size = audio_queue.qsize()
             time.sleep(1.0)
             with state_lock:
-                if not recording:
+                if not audio.recording:
                     return
-                new_count = callback_invocation_count
-                is_still_recording = recording
+                new_count = audio.callback_invocation_count
+                is_still_recording = audio.recording
             new_queue_size = audio_queue.qsize()
             callbacks_received = new_count - initial_count
             items_queued = new_queue_size - initial_queue_size
@@ -407,9 +180,9 @@ def toggle_recording():
                 logging.warning(f"Audio verification FAILED: Only {callbacks_received} callbacks (expected >= {min_expected_callbacks})")
                 stream_active = None
                 with stream_lock:
-                    if stream is not None:
+                    if audio.stream is not None:
                         try:
-                            stream_active = stream.active
+                            stream_active = audio.stream.active
                         except Exception:
                             pass
                 logging.warning(f"Stream active: {stream_active}")
@@ -418,645 +191,57 @@ def toggle_recording():
                 logging.warning("Audio verification WARNING: Callbacks running but no audio queued")
         threading.Thread(target=verify_audio_capture, daemon=True).start()
     else:
-        # Stop recording, start transcription - update state under lock
-        # Set transcribing=True atomically with recording=False to prevent
-        # the watchdog from clearing the queue in the gap between states
         with state_lock:
-            recording = False
-            transcribing = True
-            transcribe_start = datetime.now()
+            audio.recording = False
+            transcription.transcribing = True
+            transcription.transcribe_start = datetime.now()
         show_notification("Dictation", "Recording stopped")
         logging.info("Recording stopped, starting transcription thread...")
-        threading.Thread(target=transcribe_audio).start()
+        threading.Thread(target=transcription.transcribe_audio).start()
 
 # --------------------------------------
-# Repaste last transcription (F2)
+# Wire up cross-module references
 # --------------------------------------
-def repaste_last_transcription():
-    """Repaste the last transcription by reading from the log file."""
-    try:
-        if not LOG_FILE.exists():
-            logging.info("No log file found for repaste.")
-            show_notification("Dictation", "No previous transcription")
-            return
+def _set_append_target(path):
+    transcription.append_target = path
 
-        # Read log file and search backwards for most recent transcription
-        with open(LOG_FILE, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
+keyboard_mod.APPEND_BULLET_FILE = APPEND_BULLET_FILE
+keyboard_mod.APPEND_BULLET_FILE_2 = APPEND_BULLET_FILE_2
+keyboard_mod._toggle_recording = toggle_recording
+keyboard_mod._repaste_last_transcription = transcription.repaste_last_transcription
+keyboard_mod._set_append_target = _set_append_target
 
-        # Search backwards for "Cleaned transcribed text:"
-        pattern = re.compile(r"Cleaned transcribed text: '(.+)'$")
-        for line in reversed(lines):
-            match = pattern.search(line)
-            if match:
-                text = match.group(1)
-                logging.info(f"Repasting from log: '{text}'")
-                send_text_to_active_app(text)
-                show_notification("Dictation", "Repasted last transcription")
-                return
+transcription.APPEND_BULLET_FILE = APPEND_BULLET_FILE
 
-        logging.info("No transcription found in log file.")
-        show_notification("Dictation", "No previous transcription")
-
-    except Exception as e:
-        logging.error(f"Error repasting from log: {e}")
-        show_notification("Dictation", "Failed to repaste")
-
-# --------------------------------------
-# Watchdog function to monitor system health
-# --------------------------------------
-def watchdog_monitor():
-    global watchdog_active, stream, stream_healthy, last_polled_device_name, stall_recovery_count, transcribing, transcribe_start, append_target, recording, last_heartbeat
-
-    logging.info("Watchdog thread started")
-
-    poll_counter = 0
-    DEVICE_POLL_INTERVAL = 5  # seconds between device polling
-
-    while watchdog_active:
-        try:
-            # Copy state variables under lock at start of iteration (avoid TOCTOU)
-            with state_lock:
-                is_recording = recording
-                is_transcribing = transcribing
-                heartbeat_copy = last_heartbeat
-                callback_count_copy = callback_invocation_count
-                transcribe_start_copy = transcribe_start
-
-            # Check if audio stream is healthy when recording
-            if is_recording:
-                time_since_heartbeat = (datetime.now() - heartbeat_copy).total_seconds()
-
-                # Diagnostic: log stream status vs heartbeat mismatch
-                if time_since_heartbeat > 2:
-                    # Safely check stream state
-                    stream_active = None
-                    with stream_lock:
-                        if stream is not None:
-                            try:
-                                stream_active = stream.active
-                            except Exception:
-                                pass
-                    if stream_active is not None:
-                        logging.warning(f"Heartbeat stale ({time_since_heartbeat:.1f}s) but stream.active={stream_active}, callbacks={callback_count_copy}")
-
-                if time_since_heartbeat > audio_timeout:
-                    logging.warning(f"Audio system stalled! No heartbeat for {time_since_heartbeat:.1f}s")
-                    # Safely get stream state for logging
-                    stream_active = None
-                    with stream_lock:
-                        if stream is not None:
-                            try:
-                                stream_active = stream.active
-                            except Exception:
-                                pass
-                    logging.warning(f"Stream state: active={stream_active}, queue_size={audio_queue.qsize()}")
-
-                    # Clear recording flag so restart_audio_stream won't skip
-                    # (audio is dead anyway, nothing to protect)
-                    with state_lock:
-                        recording = False
-                        last_heartbeat = datetime.now()  # prevent re-trigger during restart
-
-                    # Cap stall recovery attempts to prevent infinite loop
-                    stall_recovery_count += 1
-                    if stall_recovery_count > MAX_STALL_RETRIES:
-                        logging.error(f"Stall recovery failed {stall_recovery_count} times, giving up. User must restart.")
-                        show_notification("Dictation Error", "Audio system unresponsive. Please restart the app.")
-                        # Stop retrying - just idle until user restarts
-                        continue
-                    else:
-                        show_notification("Dictation Error", f"Audio stalled, recovering (attempt {stall_recovery_count}/{MAX_STALL_RETRIES})...")
-                        restart_audio_stream()
-
-            # Detect stuck transcription (transcribing=True for way too long)
-            if is_transcribing and transcribe_start_copy is not None:
-                transcribe_elapsed = (datetime.now() - transcribe_start_copy).total_seconds()
-                if transcribe_elapsed > 90:  # 60s timeout + 30s grace
-                    logging.error(f"Transcription stuck for {transcribe_elapsed:.0f}s, force-clearing state")
-                    with state_lock:
-                        transcribing = False
-                        transcribe_start = None
-                        append_target = None
-                    show_notification("Dictation Error", "Transcription timed out, ready for new recording")
-
-            # Periodically check sounddevice status when not recording
-            elif not is_recording and not is_transcribing:
-                # Check if stream is None safely
-                stream_is_none = False
-                with stream_lock:
-                    stream_is_none = (stream is None)
-
-                if stream_is_none:
-                    # Every ~10 seconds, check that we can still access audio
-                    if random.random() < 0.1:  # 10% chance each cycle
-                        try:
-                            test_microphone_access()
-                            with state_lock:
-                                stream_healthy = True
-                        except Exception as e:
-                            logging.error(f"Microphone access failed in watchdog: {e}")
-                            with state_lock:
-                                stream_healthy = False
-
-            # Polling fallback for device changes (backup for CoreAudio listener)
-            poll_counter += 1
-            if poll_counter >= DEVICE_POLL_INTERVAL and not is_recording and not is_transcribing:
-                poll_counter = 0
-                try:
-                    # Check current default device WITHOUT refreshing first
-                    # Only refresh if we detect a change
-                    current_device_name = get_current_default_device_name()
-
-                    if last_polled_device_name is not None and current_device_name != last_polled_device_name:
-                        logging.info(f"Polling detected device change: {last_polled_device_name} -> {current_device_name}")
-                        # NOW refresh sounddevice cache to pick up the new device
-                        refresh_sounddevice()
-                        apply_device_change()
-
-                    # Update baseline (do this regardless of whether change was detected)
-                    last_polled_device_name = current_device_name
-
-                except Exception as e:
-                    logging.warning(f"Device polling error: {e}")
-
-            # Sleep to avoid consuming too much CPU
-            time.sleep(1)
-
-        except Exception as e:
-            logging.error(f"Watchdog error: {e}")
-            logging.error(traceback.format_exc())
-            time.sleep(5)  # Wait longer after an error
-
-def restart_audio_stream():
-    """Safely restart the audio stream with thread-safe guards"""
-    global stream, recording, transcribing, audio_queue, stream_healthy, restart_in_progress
-
-    # Prevent concurrent restarts - use non-blocking acquire
-    if not stream_lock.acquire(blocking=False):
-        logging.info("Restart skipped: another restart in progress (lock held)")
-        return
-
-    try:
-        # Check if restart already in progress (double-check pattern)
-        if restart_in_progress:
-            logging.info("Restart skipped: another restart in progress (flag set)")
-            return
-
-        restart_in_progress = True
-
-        # Check recording/transcribing flags under state_lock BEFORE clearing queue
-        with state_lock:
-            if transcribing:
-                logging.info("Restart skipped: transcription in progress")
-                return
-            if recording:
-                logging.info("Restart skipped: recording in progress (protecting queued audio)")
-                return
-
-        logging.info("Attempting to restart audio stream")
-
-        # Save current output device before any audio changes
-        saved_output_device = get_current_output_device()
-
-        # Close old stream if it exists
-        if stream is not None:
-            try:
-                stream.stop()
-                stream.close()
-            except Exception as e:
-                logging.warning(f"Error closing old stream: {e}")
-
-        # Clear any stale data from the queue before creating new stream
-        # Safe to clear since we verified transcribing=False above
-        queue_cleared = 0
-        while not audio_queue.empty():
-            try:
-                audio_queue.get_nowait()
-                queue_cleared += 1
-            except queue.Empty:
-                break
-        if queue_cleared > 0:
-            logging.info(f"Cleared {queue_cleared} stale items from audio queue")
-
-        # Recreate stream with same device as before
-        device_index = select_input_device(args.device)
-        device_name = sd.query_devices(device_index)['name']
-        logging.info(f"Recreating stream with device: {device_name}")
-
-        stream = sd.InputStream(
-            callback=audio_callback,
-            channels=1,
-            samplerate=16000,
-            device=device_index
-        )
-        stream.start()
-
-        # Restore output device if it was changed
-        if saved_output_device:
-            restore_output_device(saved_output_device)
-
-        # Update status under lock
-        with state_lock:
-            stream_healthy = True
-            update_heartbeat()
-
-        logging.info("Audio stream restarted successfully (silent recovery)")
-
-    except Exception as e:
-        logging.error(f"Failed to restart audio stream: {e}")
-        logging.error(traceback.format_exc())
-        with state_lock:
-            stream_healthy = False
-            recording = False
-        show_notification("Dictation Error", "Failed to restart audio")
-    finally:
-        restart_in_progress = False
-        stream_lock.release()
-
-def update_heartbeat():
-    """Update the heartbeat timestamp under lock for cross-thread visibility"""
-    global last_heartbeat
-    with state_lock:
-        last_heartbeat = datetime.now()
-
-
-def apply_device_change(old_device_id=None, new_device_id=None):
-    """
-    Handle audio device change by refreshing sounddevice and recreating stream.
-
-    Called by CoreAudio listener when default input device changes, or by
-    polling fallback when a device change is detected.
-    """
-    global stream, stream_healthy, last_polled_device_name
-
-    logging.info(f"Device change detected: {old_device_id} -> {new_device_id}")
-
-    # Check recording/transcribing state under lock
-    with state_lock:
-        if recording:
-            logging.info("Device change ignored: recording in progress")
-            return
-        if transcribing:
-            logging.info("Device change ignored: transcription in progress")
-            return
-
-    # Acquire stream_lock for stream operations
-    with stream_lock:
-        try:
-            # Close existing stream before refreshing device list
-            if stream is not None:
-                try:
-                    if stream.active:
-                        stream.stop()
-                    stream.close()
-                    logging.info("Closed existing audio stream")
-                except Exception as e:
-                    logging.warning(f"Error closing stream during device change: {e}")
-                stream = None
-
-            # Refresh sounddevice/PortAudio device cache
-            refresh_sounddevice()
-
-            # Get the new default device info
-            new_device_name = get_current_default_device_name()
-            last_polled_device_name = new_device_name
-            logging.info(f"New default input device: {new_device_name}")
-
-            # Pre-initialize new stream with new device
-            device_index = select_input_device(args.device)
-            actual_device_name = sd.query_devices(device_index)['name']
-            logging.info(f"Creating new stream with device: {actual_device_name}")
-
-            stream = sd.InputStream(
-                callback=audio_callback,
-                channels=1,
-                samplerate=16000,
-                device=device_index
-            )
-            stream.start()
-            logging.info("Started new audio stream after device change")
-
-            with state_lock:
-                stream_healthy = True
-                update_heartbeat()
-
-            show_notification("Dictation", f"Switched to: {actual_device_name}")
-            logging.info("Audio stream recreated with new device")
-
-        except Exception as e:
-            logging.error(f"Failed to apply device change: {e}")
-            logging.error(traceback.format_exc())
-            with state_lock:
-                stream_healthy = False
-            show_notification("Dictation Error", "Failed to switch audio device")
-
-# --------------------------------------
-# Output device preservation functions
-# --------------------------------------
-def get_current_output_device():
-    """Get the current system output device name."""
-    try:
-        # Try using SwitchAudioSource if available
-        result = subprocess.run(
-            ['SwitchAudioSource', '-c', '-t', 'output'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0:
-            device_name = result.stdout.strip()
-            logging.info(f"Current output device: {device_name}")
-            return device_name
-    except FileNotFoundError:
-        logging.debug("SwitchAudioSource not found, using AppleScript fallback")
-    except Exception as e:
-        logging.warning(f"Error getting output device via SwitchAudioSource: {e}")
-
-    # Fallback to AppleScript
-    try:
-        script = 'tell application "System Preferences" to quit'
-        subprocess.run(['osascript', '-e', script], capture_output=True, timeout=2)
-
-        script = '''
-        tell application "System Preferences"
-            reveal anchor "output" of pane id "com.apple.preference.sound"
-        end tell
-        delay 0.5
-        tell application "System Events"
-            tell process "System Preferences"
-                set outputDevice to value of text field 1 of row 1 of table 1 of scroll area 1 of tab group 1 of window 1
-            end tell
-        end tell
-        tell application "System Preferences" to quit
-        return outputDevice
-        '''
-        # This AppleScript approach is complex and may not work reliably
-        # Instead, use sounddevice's default device query
-        default_output = sd.default.device[1]
-        if default_output is not None:
-            devices = sd.query_devices()
-            if 0 <= default_output < len(devices):
-                device_name = devices[default_output]['name']
-                logging.info(f"Current output device (via sounddevice): {device_name}")
-                return device_name
-    except Exception as e:
-        logging.warning(f"Error getting output device: {e}")
-
-    return None
-
-def restore_output_device(device_name):
-    """Restore the system output device to the specified device."""
-    if device_name is None:
-        return
-
-    try:
-        # Try using SwitchAudioSource if available
-        result = subprocess.run(
-            ['SwitchAudioSource', '-s', device_name, '-t', 'output'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0:
-            logging.info(f"Restored output device to: {device_name}")
-            return True
-    except FileNotFoundError:
-        logging.debug("SwitchAudioSource not found, cannot restore output device")
-    except Exception as e:
-        logging.warning(f"Error restoring output device via SwitchAudioSource: {e}")
-
-    # Note: AppleScript fallback for setting output device is complex and unreliable
-    # If SwitchAudioSource is not available, log a warning
-    logging.warning(f"Could not restore output device. Install SwitchAudioSource: brew install switchaudio-osx")
-    return False
-
-# --------------------------------------
-# Select input device
-# --------------------------------------
-def select_input_device(device_arg):
-    if device_arg is not None:
-        devices = sd.query_devices()
-        # Try to interpret as index
-        try:
-            idx = int(device_arg)
-            if 0 <= idx < len(devices):
-                return idx
-        except ValueError:
-            pass
-        # Else try substring match by name
-        for i, d in enumerate(devices):
-            if device_arg.lower() in d['name'].lower():
-                return i
-        logging.warning(f"Specified device '{device_arg}' not found. Using default.")
-    
-    default_input_device = sd.default.device[0]
-    if default_input_device is None:
-        # fallback to first available
-        for i, d in enumerate(sd.query_devices()):
-            if d['max_input_channels'] > 0:
-                logging.info(f"Found available device: {d['name']}")
-                return i
-        raise RuntimeError("No input devices found.")
-    
-    return default_input_device
-
-# --------------------------------------
-# Show macOS notification
-# --------------------------------------
-def show_notification(title, message):
-    os.system(f'''osascript -e 'display notification "{message}" with title "{title}"' ''')
-
-# --------------------------------------
-# Append transcription as bullet to markdown file
-# --------------------------------------
-def append_bullet_to_file(text, file_path=None):
-    """Append text as a bullet point to the specified markdown file."""
-    target = Path(file_path or APPEND_BULLET_FILE)
-    try:
-        # Ensure parent directory exists
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        # Ensure file ends with newline before appending
-        needs_newline = False
-        if target.exists():
-            with open(target, 'rb') as f:
-                f.seek(0, 2)  # seek to end
-                if f.tell() > 0:
-                    f.seek(-1, 2)
-                    needs_newline = f.read(1) != b'\n'
-
-        with open(target, 'a') as f:
-            if needs_newline:
-                f.write('\n')
-            f.write(f'- {text}\n')
-
-        logging.info(f"Appended bullet to {target}: '- {text}'")
-        # Escape single quotes for osascript
-        safe_text = text.replace("'", "'\\''").replace('"', '\\"')
-        show_notification("TODO Added", safe_text)
-        return True
-    except Exception as e:
-        logging.error(f"Failed to append bullet to {target}: {e}")
-        show_notification("Dictation Error", "Failed to append to file")
-        return False
-
-# --------------------------------------
-# Transcribe audio (runs in a thread)
-# --------------------------------------
-def transcribe_audio():
-    global transcribing, append_target, transcribe_start
-    # transcribing already set to True by toggle_recording() before thread spawn
-    # to prevent watchdog from clearing the queue in the gap between states
-    transcribe_start_time = datetime.now()
-    max_transcribe_time = 60  # seconds before transcription times out
-
-    logging.info(f"Transcription started at {transcribe_start_time}")
-
-    try:
-        # Gather audio from the queue
-        audio_data = []
-        try:
-            # Use a timeout when getting from the queue
-            while not audio_queue.empty():
-                try:
-                    item = audio_queue.get(timeout=1.0)
-                    audio_data.append(item)
-                except queue.Empty:
-                    break
-        except Exception as e:
-            logging.error(f"Error gathering audio data: {e}")
-
-        if not audio_data:
-            logging.info("No audio data captured; skipping transcription.")
-            show_notification("Dictation", "No audio recorded")
-            return  # finally block will set transcribing=False
-
-        audio = np.concatenate(audio_data, axis=0).flatten()
-        logging.info(f"Captured {len(audio)} samples from queue.")
-
-        # Check amplitude to avoid feeding near-empty audio
-        max_amp = np.max(np.abs(audio))
-        logging.info(f"Max amplitude of audio: {max_amp}")
-        if max_amp < 1e-5:  # Arbitrary tiny threshold
-            logging.info("Audio is essentially silent; skipping transcription.")
-            show_notification("Dictation", "Audio too quiet, try again")
-            return  # finally block will set transcribing=False
-
-        # Normalize
-        audio = audio / max_amp
-
-        # Transcribe with timeout monitoring in a separate thread
-        logging.info("Beginning Whisper transcription...")
-        
-        # Create a thread-safe container for the result
-        result_container = {"success": False, "result": None, "error": None}
-        
-        def transcribe_with_timeout():
-            try:
-                result_container["result"] = model.transcribe(audio, fp16=False)
-                result_container["success"] = True
-            except Exception as e:
-                result_container["error"] = str(e)
-                logging.error(f"Transcription error: {e}")
-                logging.error(traceback.format_exc())
-        
-        # Start transcription in a separate thread
-        transcribe_thread = threading.Thread(target=transcribe_with_timeout)
-        transcribe_thread.daemon = True
-        transcribe_thread.start()
-        
-        # Monitor the thread with timeout
-        timeout_reached = False
-        while transcribe_thread.is_alive():
-            # Check if we've exceeded the time limit
-            elapsed = (datetime.now() - transcribe_start_time).total_seconds()
-            if elapsed > max_transcribe_time:
-                timeout_reached = True
-                logging.warning(f"Transcription timed out after {elapsed:.1f} seconds")
-                show_notification("Dictation", "Transcription is taking too long, try again")
-                # We can't stop the thread, but we can stop waiting for it
-                break
-            time.sleep(0.5)
-            
-        if timeout_reached:
-            return  # finally block will set transcribing=False
-
-        if not result_container["success"]:
-            logging.error(f"Transcription failed: {result_container['error']}")
-            show_notification("Dictation Error", "Transcription failed")
-            return  # finally block will set transcribing=False
-            
-        # Process the transcription result
-        result = result_container["result"]
-        transcribe_elapsed = (datetime.now() - transcribe_start_time).total_seconds()
-        logging.info(f"Whisper transcription completed in {transcribe_elapsed:.2f}s")
-
-        text = result['text'].strip()
-        logging.info(f"Raw transcribed text: '{text}'")
-
-        text = cleanup_text(text).strip()
-        logging.info(f"Cleaned transcribed text: '{text}'")
-
-        if text:
-            # Check if we're in append-to-file mode
-            if append_target:
-                append_bullet_to_file(text, append_target)
-            else:
-                send_text_to_active_app(text + " ")
-        else:
-            logging.info("No text to paste (empty transcription).")
-            show_notification("Dictation", "No text detected")
-
-    except Exception as e:
-        logging.error(f"Error in transcription process: {e}")
-        logging.error(traceback.format_exc())
-        show_notification("Dictation Error", "Transcription error")
-
-    finally:
-        # Clear transcribing and append_target flags under lock
-        with state_lock:
-            transcribing = False
-            transcribe_start = None
-            append_target = None
-
-# --------------------------------------
-# Test microphone access
-# --------------------------------------
-def test_microphone_access():
-    try:
-        sd.check_input_settings()
-        logging.info("Microphone access test passed.")
-    except Exception as e:
-        logging.error(f"Microphone access test failed: {e}")
+watchdog_mod._get_device_arg = lambda: args.device
 
 # --------------------------------------
 # Main execution
 # --------------------------------------
 if __name__ == "__main__":
     try:
-        # Parse arguments first so we have access to them in other functions
         args = parse_arguments()
         model_size = args.model
-        
-        # Configure more detailed logging for stability tracking
+
+        # Disable App Nap and assert performance activity
+        process_info = AppKit.NSProcessInfo.processInfo()
+        process_info.disableAutomaticTermination_("Dictation active")
+        _perf_activity = process_info.beginActivityWithOptions_reason_(
+            0x00FFFFFF | 0x01, "Whisper transcription requires performance cores")
+
         logging.info("=" * 60)
         logging.info(f"Dictation tool starting (model: {model_size})")
         logging.info("=" * 60)
-    
-        # Kill old processes FIRST before starting event tap
-        kill_old_processes()
-        time.sleep(0.5)  # Give processes time to die
 
-        # Start the event tap in a separate thread
+        kill_old_processes()
+        time.sleep(0.5)
+
         logging.info("Starting event tap thread...")
         threading.Thread(target=run_event_tap, daemon=True).start()
 
-        # Wait for event tap to initialize (max 3 seconds)
         logging.info("Waiting for event tap to initialize...")
         event_tap_ready.wait(timeout=3.0)
 
-        # Check if event tap failed
         if event_tap_failed.is_set() or not event_tap_ready.is_set():
             logging.error("Event tap failed to start. Exiting.")
             show_notification("Dictation Error", "Accessibility permission denied. Add Python to Accessibility settings.")
@@ -1064,104 +249,97 @@ if __name__ == "__main__":
             sys.exit(1)
 
         logging.info("Event tap initialized successfully.")
-    
-        # Force macOS to show processes, ensuring the script is recognized
+
         os.system('osascript -e \'tell application "System Events" to get the name of every process\'')
-    
-        # Trigger mic permission prompt if needed
+
         test_microphone_access()
-    
-        # Setup lock file & cleanup
+
         setup_lock_file()
         atexit.register(cleanup_lock_file)
-    
+
+        device_monitor = None
+
         def signal_exit_handler(signum, frame):
             logging.info(f"Received signal {signum}, shutting down...")
-            global watchdog_active, device_monitor
-            watchdog_active = False
-            # Stop device monitor
+            watchdog_mod.watchdog_active = False
             if device_monitor is not None:
                 try:
                     device_monitor.stop()
                 except Exception as e:
                     logging.warning(f"Error stopping device monitor: {e}")
             cleanup_lock_file()
-            if stream is not None:
+            if audio.stream is not None:
                 try:
-                    stream.stop()
-                    stream.close()
+                    audio.stream.stop()
+                    audio.stream.close()
                 except Exception as e:
                     logging.warning(f"Error closing stream during shutdown: {e}")
             os._exit(0)
-    
+
         signal.signal(signal.SIGINT, signal_exit_handler)
         signal.signal(signal.SIGTERM, signal_exit_handler)
-        
+
         # Load the Whisper model
         logging.info(f"Loading Whisper model '{model_size}'...")
         model = whisper.load_model(model_size)
-        logging.info("Model loaded successfully.")
-        
-        # Prepare audio stream for listening
-        # Pre-initialize stream to avoid delays when starting to record
+        transcription.model = model
+        logging.info(f"Model loaded successfully. torch.get_num_threads()={torch.get_num_threads()}, "
+                     f"torch.get_num_interop_threads()={torch.get_num_interop_threads()}, "
+                     f"OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS')}, "
+                     f"cpu_count={os.cpu_count()}")
+
+        # Pre-initialize audio stream
         try:
-            # Save current output device before any audio changes
             saved_output_device = get_current_output_device()
 
             device_index = select_input_device(args.device)
             device_name = sd.query_devices(device_index)['name']
             logging.info(f"Pre-initializing input device: {device_name}")
 
-            stream = sd.InputStream(
+            audio.stream = sd.InputStream(
                 callback=audio_callback,
                 channels=1,
                 samplerate=16000,
                 device=device_index
             )
 
-            # Restore output device if it was changed during initialization
             if saved_output_device:
                 restore_output_device(saved_output_device)
 
-            # Don't start the stream yet, just initialize it
             logging.info("Audio stream pre-initialized successfully.")
             update_heartbeat()
-            stream_healthy = True
+            audio.stream_healthy = True
         except Exception as e:
             logging.error(f"Failed to pre-initialize audio stream: {e}")
             logging.error(traceback.format_exc())
-            
-        # Start the watchdog thread
+
+        # Start watchdog
         logging.info("Starting watchdog monitor thread...")
-        watchdog_thread = threading.Thread(target=watchdog_monitor, daemon=True)
+        watchdog_mod.last_polled_device_name = device_name
+        watchdog_thread = threading.Thread(target=watchdog_mod.watchdog_monitor, daemon=True)
         watchdog_thread.start()
 
-        # Initialize polling baseline
-        last_polled_device_name = device_name
-
-        # Start the device monitor (CoreAudio listener)
+        # Start device monitor
         logging.info("Starting device monitor...")
-        device_monitor = DeviceMonitor(apply_device_change)
+        device_monitor = DeviceMonitor(watchdog_mod.apply_device_change)
         if device_monitor.start():
             logging.info("CoreAudio device monitor started successfully")
         else:
             logging.warning("CoreAudio device monitor failed to start, using polling fallback only")
             device_monitor = None
 
-        # Show notification that we're ready
         ready_msg = "Ready (F1=record, F2=repaste"
         if APPEND_BULLET_FILE:
             ready_msg += ", Cmd+F1=TODO"
         ready_msg += ")"
         show_notification("Dictation", ready_msg)
-    
-        # Keep main thread alive, but exit if critical threads die
+
+        # Main loop
         try:
             consecutive_failures = 0
-            MAX_WATCHDOG_FAILURES = 10  # Exit after watchdog is dead for ~10 seconds
+            MAX_WATCHDOG_FAILURES = 10
             while True:
                 time.sleep(1)
-                # Check if watchdog thread is still alive
                 if not watchdog_thread.is_alive():
                     consecutive_failures += 1
                     if consecutive_failures >= MAX_WATCHDOG_FAILURES:
@@ -1173,17 +351,17 @@ if __name__ == "__main__":
                     consecutive_failures = 0
         except KeyboardInterrupt:
             logging.info("KeyboardInterrupt: Exiting...")
-            watchdog_active = False
+            watchdog_mod.watchdog_active = False
             if device_monitor is not None:
                 try:
                     device_monitor.stop()
                 except Exception as e:
                     logging.warning(f"Error stopping device monitor: {e}")
             cleanup_lock_file()
-            if stream is not None:
+            if audio.stream is not None:
                 try:
-                    stream.stop()
-                    stream.close()
+                    audio.stream.stop()
+                    audio.stream.close()
                 except Exception as e:
                     logging.warning(f"Error closing stream during shutdown: {e}")
             os._exit(0)
