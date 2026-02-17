@@ -24,8 +24,9 @@ import random
 from datetime import datetime
 
 from pathlib import Path
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
+src_dir = Path(__file__).parent
+project_root = src_dir.parent
+sys.path.insert(0, str(src_dir))
 from text_postprocessor import cleanup_text, send_text_to_active_app
 from device_monitor import DeviceMonitor, refresh_sounddevice, get_current_default_device_name, COREAUDIO_AVAILABLE
 
@@ -69,7 +70,7 @@ stall_recovery_count = 0  # Consecutive stall recoveries without successful reco
 MAX_STALL_RETRIES = 3  # Max consecutive stall recoveries before giving up
 
 # Load .env.local for custom shortcut config (e.g. APPEND_BULLET_FILE path)
-ENV_LOCAL_FILE = Path(__file__).parent / '.env.local'
+ENV_LOCAL_FILE = project_root / '.env.local'
 if ENV_LOCAL_FILE.exists():
     with open(ENV_LOCAL_FILE, 'r') as f:
         for line in f:

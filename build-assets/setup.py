@@ -11,8 +11,10 @@ import os
 # Ensure paths resolve relative to project root, not build-assets/
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(PROJECT_ROOT)
+import sys
+sys.path.insert(0, os.path.join(PROJECT_ROOT, 'src'))
 
-APP = ['dictate.py']
+APP = ['src/dictate.py']
 DATA_FILES = ['.env.local']
 
 OPTIONS = {

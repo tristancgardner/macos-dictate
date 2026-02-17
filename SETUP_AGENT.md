@@ -17,16 +17,16 @@ pip install py2app  # only needed for .app builds
 Run the app with:
 
 ```bash
-./venv/bin/python dictate.py --model small
+./venv/bin/python src/dictate.py --model small
 ```
 
 ## Project Structure
 
 | File | Purpose |
 |---|---|
-| `dictate.py` | Main app (~1150 lines). All recording, transcription, keyboard shortcuts, watchdog, and threading logic. |
-| `text_postprocessor.py` | Text cleanup pipeline: custom word corrections (`WORD_MAPPINGS`), smart quoting (`QUOTE_TRIGGERS`, `GREEDY_QUOTE_TRIGGERS`), punctuation normalization. |
-| `device_monitor.py` | CoreAudio device change detection via ctypes. Handles hot-swap microphone switching with CFRunLoop listener + polling fallback. |
+| `src/dictate.py` | Main app (~1150 lines). All recording, transcription, keyboard shortcuts, watchdog, and threading logic. |
+| `src/text_postprocessor.py` | Text cleanup pipeline: custom word corrections (`WORD_MAPPINGS`), smart quoting (`QUOTE_TRIGGERS`, `GREEDY_QUOTE_TRIGGERS`), punctuation normalization. |
+| `src/device_monitor.py` | CoreAudio device change detection via ctypes. Handles hot-swap microphone switching with CFRunLoop listener + polling fallback. |
 | `build-assets/setup.py` | py2app config for building `Dictate.app`. Plist settings, icon, package list. |
 | `build-assets/rebuild.sh` | Full rebuild + codesign + TCC reset script. Run after `setup.py` changes. |
 | `build-assets/entitlements.plist` | Code signing entitlements (microphone, unsigned-memory, disable-lib-validation). |
@@ -36,9 +36,9 @@ Run the app with:
 
 ## Key Variables
 
-- `append_target` — global in `dictate.py`. When set to a file path, the next transcription appends as a markdown bullet (`- text`) to that file instead of pasting. Reset to `None` after each transcription.
+- `append_target` — global in `src/dictate.py`. When set to a file path, the next transcription appends as a markdown bullet (`- text`) to that file instead of pasting. Reset to `None` after each transcription.
 - `APPEND_BULLET_FILE` / `APPEND_BULLET_FILE_2` — loaded from `.env.local` at startup. Drive the Cmd+F1 and Alt+F1 shortcuts.
-- `OMP_NUM_THREADS` / `MKL_NUM_THREADS` — set at the very top of `dictate.py` before any imports. Critical for PyTorch multi-threading in `.app` environments. Without these, Whisper runs on a single CPU core.
+- `OMP_NUM_THREADS` / `MKL_NUM_THREADS` — set at the very top of `src/dictate.py` before any imports. Critical for PyTorch multi-threading in `.app` environments. Without these, Whisper runs on a single CPU core.
 
 ## Keyboard Shortcuts
 
@@ -53,17 +53,17 @@ Run the app with:
 
 ## App Packaging (py2app)
 
-- **Alias mode**: `python build-assets/setup.py py2app -A` — the `.app` symlinks to source files. Code changes are live after quit + relaunch. No rebuild needed.
+- **Alias mode**: `python build-assets/setup.py py2app -A` — the `.app` symlinks to source files. Code changes in `src/` are live after quit + relaunch. No rebuild needed.
 - **Full rebuild**: Only needed after `build-assets/setup.py` changes. Use `./build-assets/rebuild.sh`.
 - **TCC permissions**: Every rebuild invalidates macOS TCC grants (Accessibility + Input Monitoring). Must re-add the app in System Settings after each rebuild.
 - **Bundle ID**: `com.suorastudios.dictate` (in `build-assets/setup.py`). Change this if forking.
 
 ## Customization Points
 
-- **Word corrections**: `WORD_MAPPINGS` dict in `text_postprocessor.py` — regex pattern → replacement string
-- **Quote triggers**: `QUOTE_TRIGGERS` list in `text_postprocessor.py` — trigger phrases that auto-wrap following words in quotes
-- **Greedy quote triggers**: `GREEDY_QUOTE_TRIGGERS` in `text_postprocessor.py` — quotes everything to end of utterance
-- **Default model**: `default='small'` in `dictate.py` argparse
+- **Word corrections**: `WORD_MAPPINGS` dict in `src/text_postprocessor.py` — regex pattern → replacement string
+- **Quote triggers**: `QUOTE_TRIGGERS` list in `src/text_postprocessor.py` — trigger phrases that auto-wrap following words in quotes
+- **Greedy quote triggers**: `GREEDY_QUOTE_TRIGGERS` in `src/text_postprocessor.py` — quotes everything to end of utterance
+- **Default model**: `default='small'` in `src/dictate.py` argparse
 - **Append file targets**: `APPEND_BULLET_FILE` / `APPEND_BULLET_FILE_2` in `.env.local`
 
 ## Critical Rules
@@ -71,7 +71,7 @@ Run the app with:
 - All file opens **must** use `encoding='utf-8'` — the `.app` process defaults to ASCII
 - `OMP_NUM_THREADS` must be set **before** `import torch` — placing it after has no effect
 - Never call `refresh_sounddevice()` unconditionally in the watchdog poll loop — it reinitializes PortAudio every call and will freeze the app
-- Never hardcode personal file paths in `dictate.py` — use `.env.local` environment variables
+- Never hardcode personal file paths in source — use `.env.local` environment variables
 
 ## Log File
 

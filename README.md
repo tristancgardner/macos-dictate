@@ -128,7 +128,7 @@ Both variables are optional. If not set, the corresponding shortcut falls throug
 
 ```bash
 source venv/bin/activate
-python dictate.py --model small
+python src/dictate.py --model small
 ```
 
 Available models (in order of size):
@@ -157,7 +157,7 @@ Running as a `.app` gives the app its own TCC identity, so Accessibility and Inp
 python build-assets/setup.py py2app -A
 ```
 
-The `-A` flag builds in alias mode: the `.app` symlinks to your source files. Code changes in `dictate.py` or `text_postprocessor.py` take effect after a quit and relaunch—no rebuild needed. Only changes to `build-assets/setup.py` require a rebuild.
+The `-A` flag builds in alias mode: the `.app` symlinks to your source files. Code changes in `src/` take effect after a quit and relaunch—no rebuild needed. Only changes to `build-assets/setup.py` require a rebuild.
 
 ### Rebuild Script
 
@@ -202,7 +202,7 @@ The app will not be able to intercept keyboard shortcuts without Accessibility +
 
 ### Whisper Model
 
-Pass `--model` when running from the terminal, or modify the default in `dictate.py`:
+Pass `--model` when running from the terminal, or modify the default in `src/dictate.py`:
 
 ```python
 parser.add_argument('--model', type=str, default='small', ...)
@@ -210,7 +210,7 @@ parser.add_argument('--model', type=str, default='small', ...)
 
 ### Custom Word Corrections
 
-Edit `text_postprocessor.py` → `WORD_MAPPINGS`. Each entry is a regex pattern mapped to a replacement string:
+Edit `src/text_postprocessor.py` → `WORD_MAPPINGS`. Each entry is a regex pattern mapped to a replacement string:
 
 ```python
 WORD_MAPPINGS = {
@@ -222,7 +222,7 @@ WORD_MAPPINGS = {
 
 ### Quote Trigger Phrases
 
-Edit `QUOTE_TRIGGERS` in `text_postprocessor.py`. Words following these phrases are automatically wrapped in single quotes:
+Edit `QUOTE_TRIGGERS` in `src/text_postprocessor.py`. Words following these phrases are automatically wrapped in single quotes:
 
 ```python
 QUOTE_TRIGGERS = [
