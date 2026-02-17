@@ -154,17 +154,17 @@ Running as a `.app` gives the app its own TCC identity, so Accessibility and Inp
 ### Build
 
 ```bash
-python setup.py py2app -A
+python build-assets/setup.py py2app -A
 ```
 
-The `-A` flag builds in alias mode: the `.app` symlinks to your source files. Code changes in `dictate.py` or `text_postprocessor.py` take effect after a quit and relaunch—no rebuild needed. Only changes to `setup.py` require a rebuild.
+The `-A` flag builds in alias mode: the `.app` symlinks to your source files. Code changes in `dictate.py` or `text_postprocessor.py` take effect after a quit and relaunch—no rebuild needed. Only changes to `build-assets/setup.py` require a rebuild.
 
 ### Rebuild Script
 
 `rebuild.sh` handles the full cycle automatically:
 
 ```bash
-./rebuild.sh
+./build-assets/rebuild.sh
 ```
 
 This will:

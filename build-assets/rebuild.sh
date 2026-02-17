@@ -1,9 +1,14 @@
 #!/bin/bash
 # Rebuild Dictate.app (alias mode)
-# Only needed when setup.py changes -- code changes are live via symlinks
+# Only needed when setup.py or build-assets change -- code changes are live via symlinks
+# Run from anywhere: ./build-assets/rebuild.sh
 
 set -e
-cd "$(dirname "$0")"
+
+# Always operate from project root
+SCRIPT_DIR="$(dirname "$0")"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_ROOT"
 
 PYTHON="/Users/tristangardner/.pyenv/versions/3.12.7/envs/venv/bin/python"
 BUNDLE_ID="com.suorastudios.dictate"
@@ -17,10 +22,10 @@ echo "==> Cleaning build artifacts..."
 rm -rf build dist
 
 echo "==> Building Dictate.app (alias mode)..."
-$PYTHON setup.py py2app -A
+$PYTHON build-assets/setup.py py2app -A
 
 echo "==> Code signing with entitlements..."
-codesign --deep --force --options=runtime --entitlements entitlements.plist -s - "$APP"
+codesign --deep --force --options=runtime --entitlements build-assets/entitlements.plist -s - "$APP"
 
 echo "==> Resetting TCC permissions for $BUNDLE_ID..."
 tccutil reset Accessibility "$BUNDLE_ID" 2>/dev/null || true

@@ -1,13 +1,26 @@
+# Build artifacts
 venv/
-CLAUDE.md
-.claude/
-*.pyc
-__pycache__/
-.DS_Store
-.vscode/launch.json
-PID_process_cleanup_notes.md
-test_event_tap.py
-.vscode/
-.env.local
 build/
 dist/
+*.pyc
+__pycache__/
+
+# Personal config
+CLAUDE.md
+.claude/
+.env.local
+.DS_Store
+.vscode/
+
+# Dev notes (kept locally in notes/)
+notes/
+
+# Obsolete scripts (superseded by Dictate.app + Cmd+Alt+R)
+start-dictate.command
+restart-dictate.command
+
+# Misc
+icons/
+tmp/
+test_event_tap.py
+test_device_monitor.py

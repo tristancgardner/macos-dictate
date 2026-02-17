@@ -27,9 +27,10 @@ Run the app with:
 | `dictate.py` | Main app (~1150 lines). All recording, transcription, keyboard shortcuts, watchdog, and threading logic. |
 | `text_postprocessor.py` | Text cleanup pipeline: custom word corrections (`WORD_MAPPINGS`), smart quoting (`QUOTE_TRIGGERS`, `GREEDY_QUOTE_TRIGGERS`), punctuation normalization. |
 | `device_monitor.py` | CoreAudio device change detection via ctypes. Handles hot-swap microphone switching with CFRunLoop listener + polling fallback. |
-| `setup.py` | py2app config for building `Dictate.app`. Plist settings, icon, package list. |
-| `rebuild.sh` | Full rebuild + codesign + TCC permission reset script. Run after `setup.py` changes. |
-| `entitlements.plist` | Code signing entitlements (microphone, unsigned-memory, disable-lib-validation). |
+| `build-assets/setup.py` | py2app config for building `Dictate.app`. Plist settings, icon, package list. |
+| `build-assets/rebuild.sh` | Full rebuild + codesign + TCC reset script. Run after `setup.py` changes. |
+| `build-assets/entitlements.plist` | Code signing entitlements (microphone, unsigned-memory, disable-lib-validation). |
+| `build-assets/Dictate.icns` | App icon. |
 | `.env.local` | User-specific config (file paths for append shortcuts). Copy from `.env.example`. Gitignored. |
 | `.env.example` | Template for `.env.local`. |
 
@@ -52,10 +53,10 @@ Run the app with:
 
 ## App Packaging (py2app)
 
-- **Alias mode**: `python setup.py py2app -A` — the `.app` symlinks to source files. Code changes are live after quit + relaunch. No rebuild needed.
-- **Full rebuild**: Only needed after `setup.py` changes. Use `./rebuild.sh`.
+- **Alias mode**: `python build-assets/setup.py py2app -A` — the `.app` symlinks to source files. Code changes are live after quit + relaunch. No rebuild needed.
+- **Full rebuild**: Only needed after `build-assets/setup.py` changes. Use `./build-assets/rebuild.sh`.
 - **TCC permissions**: Every rebuild invalidates macOS TCC grants (Accessibility + Input Monitoring). Must re-add the app in System Settings after each rebuild.
-- **Bundle ID**: `com.suorastudios.dictate` (in `setup.py`). Change this if forking.
+- **Bundle ID**: `com.suorastudios.dictate` (in `build-assets/setup.py`). Change this if forking.
 
 ## Customization Points
 

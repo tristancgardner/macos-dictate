@@ -1,18 +1,23 @@
 """
 py2app setup for Dictate.app
 
-Usage:
-    python setup.py py2app -A    # alias (development) mode
-    python setup.py py2app       # standalone mode (not yet tested)
+Usage (run from project root):
+    python build-assets/setup.py py2app -A    # alias (development) mode
+    python build-assets/setup.py py2app       # standalone mode (not yet tested)
 """
 from setuptools import setup
+import os
+
+# Ensure paths resolve relative to project root, not build-assets/
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+os.chdir(PROJECT_ROOT)
 
 APP = ['dictate.py']
 DATA_FILES = ['.env.local']
 
 OPTIONS = {
     'argv_emulation': False,  # Critical for PyObjC - must be False
-    'iconfile': 'Dictate.icns',
+    'iconfile': 'build-assets/Dictate.icns',
     'plist': {
         'CFBundleName': 'Dictate',
         'CFBundleDisplayName': 'Dictate',
