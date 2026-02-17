@@ -188,29 +188,23 @@ Or drag `dist/Dictate.app` to your Applications folder and add it as a Login Ite
 
 ## Grant Permissions
 
-After a rebuild, System Settings opens automatically to the two pages below. Click **+**, navigate to `dist/Dictate.app`, and toggle it on in both:
+After a rebuild, System Settings opens automatically to these two pages. Click **+** in the bottom left, navigate to `dist/Dictate.app`, and toggle it on in both:
 
-**1. Accessibility**
+<table><tr>
+<td valign="top"><p><strong>1. Accessibility</strong></p><img src="./images/mac-permissions/01-accessibility.png" width="400"></td>
+<td valign="top"><p><strong>2. Input Monitoring</strong></p><img src="./images/mac-permissions/02-input-monitoring.png" width="400"></td>
+</tr></table>
 
-![Accessibility Settings](./images/mac-permissions/01-accessibility.png)
-
-**2. Input Monitoring**
-
-![Input Monitoring Settings](./images/mac-permissions/02-input-monitoring.png)
-
-**3. Select Dictate.app** (from the file picker that opens when you click +)
+**3. Select Dictate.app** from the file picker when you click +
 
 ![Select Dictate.app](./images/mac-permissions/03-select-app.png)
 
-On first launch, macOS will prompt for additional permissions:
+On first launch, macOS will prompt for additional permissions — click **Allow** on both:
 
-**4. Documents folder access** (required if using append-to-file shortcuts)
-
-![Documents Access Prompt](./images/mac-permissions/04-documents-prompt.png)
-
-**5. Microphone access**
-
-![Microphone Access Prompt](./images/mac-permissions/05-microphone-prompt.png)
+<table><tr>
+<td valign="top"><p><strong>4. Documents folder access</strong></p><img src="./images/mac-permissions/04-documents-prompt.png" width="350"></td>
+<td valign="top"><p><strong>5. Microphone access</strong></p><img src="./images/mac-permissions/05-microphone-prompt.png" width="350"></td>
+</tr></table>
 
 The app cannot intercept keyboard shortcuts without Accessibility + Input Monitoring.
 
