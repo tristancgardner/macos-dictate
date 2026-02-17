@@ -174,10 +174,10 @@ def tap_callback(proxy, type_, event, refcon):
             logging.info("Cmd+F1 detected: append-to-file mode activated.")
             show_notification("Dictation", "Recording for TODO append...")
             toggle_recording()
-        elif alt_pressed:
-            append_target = '/Users/tristangardner/Documents/Programming/01_Apps/bizdev/__TODO_MASTER.md'
-            logging.info("Alt+F1 detected: append to bizdev TODO.")
-            show_notification("Dictation", "Recording for bizdev TODO...")
+        elif alt_pressed and APPEND_BULLET_FILE_2:
+            append_target = APPEND_BULLET_FILE_2
+            logging.info("Alt+F1 detected: append to secondary TODO file.")
+            show_notification("Dictation", "Recording for secondary TODO...")
             toggle_recording()
         else:
             logging.info("F1 key detected.")
