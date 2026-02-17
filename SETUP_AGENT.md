@@ -53,6 +53,7 @@ Run the app with:
 
 ## App Packaging (py2app)
 
+- **Why `.app`**: macOS Sequoia resets Terminal TCC permissions monthly. The `.app` bundle (`dist/Dictate.app`) gets its own stable TCC identity so permissions persist.
 - **Alias mode**: `python build-assets/setup.py py2app -A` — the `.app` symlinks to source files. Code changes in `src/` are live after quit + relaunch. No rebuild needed.
 - **Full rebuild**: Only needed after `build-assets/setup.py` changes. Use `./build-assets/rebuild.sh`.
 - **TCC permissions**: Every rebuild invalidates macOS TCC grants (Accessibility + Input Monitoring). Must re-add the app in System Settings after each rebuild.

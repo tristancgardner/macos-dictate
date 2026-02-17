@@ -8,7 +8,7 @@ A fast, reliable alternative to macOS's built-in dictation, using OpenAI's Whisp
 
 > **Using an AI coding assistant?** See [`SETUP_AGENT.md`](./SETUP_AGENT.md) for project structure, key variables, and conventions to give your agent full context on this codebase.
 
-![macOS Dictation Tool Header](./header_image.webp)
+![macOS Dictation Tool Header](./images/header_image.webp)
 
 ---
 
@@ -149,7 +149,7 @@ Available models (in order of size):
 
 ## Packaging as a Native `.app` (Recommended for Daily Use)
 
-Running as a `.app` gives the app its own TCC identity, so Accessibility and Input Monitoring permissions are stable and persist. Terminal-based TCC grants can reset monthly on macOS Sequoia.
+Running from Terminal works, but macOS Sequoia resets Terminal's TCC permissions (Accessibility, Input Monitoring) monthly — breaking the app until you re-grant them. Packaging as a `.app` gives Dictate its own stable TCC identity so permissions persist across reboots. The built app lives at `dist/Dictate.app`.
 
 ### Build
 
@@ -188,13 +188,31 @@ Or drag `dist/Dictate.app` to your Applications folder and add it as a Login Ite
 
 ## Grant Permissions
 
-On first run (or after a rebuild), grant:
+After a rebuild, System Settings opens automatically to the two pages below. Click **+**, navigate to `dist/Dictate.app`, and toggle it on in both:
 
-- **System Settings > Privacy & Security > Accessibility** — add `Dictate.app`
-- **System Settings > Privacy & Security > Input Monitoring** — add `Dictate.app`
-- **System Settings > Privacy & Security > Microphone** — add `Dictate.app`
+**1. Accessibility**
 
-The app will not be able to intercept keyboard shortcuts without Accessibility + Input Monitoring.
+![Accessibility Settings](./images/mac-permissions/01-accessibility.png)
+
+**2. Input Monitoring**
+
+![Input Monitoring Settings](./images/mac-permissions/02-input-monitoring.png)
+
+**3. Select Dictate.app** (from the file picker that opens when you click +)
+
+![Select Dictate.app](./images/mac-permissions/03-select-app.png)
+
+On first launch, macOS will prompt for additional permissions:
+
+**4. Documents folder access** (required if using append-to-file shortcuts)
+
+![Documents Access Prompt](./images/mac-permissions/04-documents-prompt.png)
+
+**5. Microphone access**
+
+![Microphone Access Prompt](./images/mac-permissions/05-microphone-prompt.png)
+
+The app cannot intercept keyboard shortcuts without Accessibility + Input Monitoring.
 
 ---
 
