@@ -7,5 +7,6 @@
       "Bash(git -C /Users/tristangardner/Documents/Programming/01_Apps/macos-dictate log --all --oneline)",
       "Bash(ls:*)"
     ]
-  }
+  },
+  "spinnerTipsEnabled": false
 }

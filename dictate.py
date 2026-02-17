@@ -79,6 +79,7 @@ if ENV_LOCAL_FILE.exists():
                 os.environ.setdefault(key.strip(), value.strip())
 
 APPEND_BULLET_FILE = os.environ.get('APPEND_BULLET_FILE')
+APPEND_BULLET_FILE_2 = os.environ.get('APPEND_BULLET_FILE_2')
 
 # Thread synchronization primitives
 state_lock = threading.RLock()   # Protects: recording, transcribing, stream_healthy, last_heartbeat, callback_count
