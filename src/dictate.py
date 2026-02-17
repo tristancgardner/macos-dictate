@@ -1,6 +1,18 @@
 import os
 os.environ['OMP_NUM_THREADS'] = '8'
 os.environ['MKL_NUM_THREADS'] = '8'
+os.environ['VECLIB_MAXIMUM_THREADS'] = '8'
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
+import AppKit
+_process_info = AppKit.NSProcessInfo.processInfo()
+_process_info.disableAutomaticTermination_("Dictation active")
+_perf_activity = _process_info.beginActivityWithOptions_reason_(
+    0x00FFFFFF | 0xFF00000000,
+    "Whisper transcription requires performance cores")
 
 import torch
 torch.set_num_threads(8)
@@ -11,18 +23,14 @@ import sounddevice as sd
 import threading
 import time
 import argparse
-import sys
-import AppKit
 import logging
 import traceback
 import atexit
 import signal
-from pathlib import Path
 from datetime import datetime
 
 src_dir = Path(__file__).parent
 project_root = src_dir.parent
-sys.path.insert(0, str(src_dir))
 
 from process import show_notification, setup_lock_file, cleanup_lock_file, kill_old_processes
 from audio import (
@@ -223,15 +231,13 @@ if __name__ == "__main__":
         args = parse_arguments()
         model_size = args.model
 
-        # Disable App Nap and assert performance activity
-        process_info = AppKit.NSProcessInfo.processInfo()
-        process_info.disableAutomaticTermination_("Dictation active")
-        _perf_activity = process_info.beginActivityWithOptions_reason_(
-            0x00FFFFFF | 0x01, "Whisper transcription requires performance cores")
-
         logging.info("=" * 60)
         logging.info(f"Dictation tool starting (model: {model_size})")
         logging.info("=" * 60)
+
+        # Launch as foreground app (P-core QoS), then immediately hide Dock icon
+        NSApp = AppKit.NSApplication.sharedApplication()
+        NSApp.setActivationPolicy_(1)  # NSApplicationActivationPolicyAccessory
 
         kill_old_processes()
         time.sleep(0.5)
