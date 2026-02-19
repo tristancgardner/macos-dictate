@@ -37,6 +37,13 @@ WORD_MAPPINGS = {
     r'route':'root',
     r'\bcolon\b': ':',
     r'\bColin\b': ':',
+    r'\bforward slash\b': '/',
+    r'\bU-?score\b': 'U-Score',
+    r'\byou score\b': 'U-Score',
+    r'\bU score\b': 'U-Score',
+    r'\bdot\b': '.',
+    r'\bthree point five\b': '3<<DOT>>5',
+    r'\bnew ?line\b': '\n',
 }
 
 # Trigger phrases that cause the following words to be wrapped in quotes
@@ -138,6 +145,27 @@ def cleanup_text(text):
     # Correct variations first
     text = correct_variations(text, WORD_MAPPINGS)
 
+    # Clean up around newlines from "new line" word mapping, then protect with placeholder
+    _NL = '<<NL>>'
+    text = re.sub(r'(?<=[.,])\s*\n\s*[.,]?\s*', _NL, text)      # period/comma already present before \n
+    text = re.sub(r'(?<![.,])\s*\n\s*[.,]?\s*', f'.{_NL}', text)  # no period before \n, add one
+
+    # Contextual dash/hyphen: only at sentence boundaries (followed by period from Whisper)
+    text = re.sub(r'\b[Dd]ash\.\s*', '- ', text)
+    text = re.sub(r'\b[Hh]yphen\.\s*', '- ', text)
+
+    # Collapse redundant punctuation clusters (e.g. ", . ." or ". . ." from Whisper + word mapping)
+    text = re.sub(r',[ .]+', '. ', text)
+    text = re.sub(r'\.[ .]+', '. ', text)
+
+    # Collapse inline punctuation using placeholder to protect dots from punctuation spacing step
+    _DOT = '<<DOT>>'
+    text = re.sub(r'(\d+)\s+point\s+(\d+)', rf'\1{_DOT}\2', text, flags=re.IGNORECASE)
+    text = re.sub(r'(\d)\.(\d)', rf'\1{_DOT}\2', text)  # protect digit.digit (e.g. 3.5)
+    text = re.sub(r'(\w)\.([a-z])', rf'\1{_DOT}\2', text)  # protect word.lowercase (e.g. Next.js, public.master)
+    text = re.sub(r'(\w)\s+/\s+(\w)', r'\1/\2', text)
+    text = re.sub(r'(\w)\s+\.\s+(\w)', rf'\1{_DOT}\2', text)
+
     # Apply greedy quoting first (say -> quote everything remaining)
     text = apply_greedy_quotes(text)
 
@@ -147,8 +175,13 @@ def cleanup_text(text):
     # Single spaces after punctuation
     text = re.sub(r'\s*([.,?!:])\s*', r'\1 ', text)
 
-    # Remove extra punctuation before a newline
-    text = re.sub(r'[.,]\s*\n', r'\n', text)
+    # Restore placeholders
+    text = text.replace(_DOT, '.')
+    text = text.replace(f' {_NL}', _NL)  # remove space punctuation step added before NL
+    text = text.replace(_NL, '\n')
+
+    # Remove trailing commas before a newline (keep periods)
+    text = re.sub(r',\s*\n', r'.\n', text)
 
     # Standardize multiple newlines => double newline
     text = re.sub(r'\n+', '\n\n', text)
