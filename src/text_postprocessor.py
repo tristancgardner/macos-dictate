@@ -1,50 +1,24 @@
 import re
 import subprocess
 import os
+import json
 import time
 import threading
+from pathlib import Path
 
 WORD_MAPPINGS = {
-    r'super-?base': 'Supabase',
-    r'super base': 'Supabase',
-    r'supabase': 'Supabase',
-    r'next\.js': 'Next.js',
-    r'nextjs': 'Next.js',
-    r'mtp': 'MCP',
-    r'versal': 'Vercel',
-    r'file ID': 'file_id',
-    r'File ID': 'file_id',
-    r'result json': 'result_json',
-    r'dialog summary': 'dialog_summary',
-    r'speaker map': 'speaker_map',
-    r'dialogue': 'dialog',
-    r'dialogue summary': 'dialog_summary',
-    r'file name column': 'file_name column',
-    r'OG ASR': 'og_asr',
-    r' original ASR': 'og_asr',
-    r'original asr': 'og_asr',
-    r'O-G-A-S-R': 'og_asr',
-    r'Cloud': 'Claude',
-    r'CloudCode': 'Claude-Code',
-    r'Cloud Code': 'Claude-Code',
-    r'Club code': 'Claude-Code',
-    r'Clawed code': 'Claude-Code',
-    r'Clawed': 'Claude',
-    r'ClawedCode': 'Claude-Code',
-    r'Soros': 'Suora',
-    r'Sora Studios': 'Suora Studios',
-    r'Sora': 'Suora',
-    r'route':'root',
     r'\bcolon\b': ':',
     r'\bColin\b': ':',
     r'\bforward slash\b': '/',
-    r'\bU-?score\b': 'U-Score',
-    r'\byou score\b': 'U-Score',
-    r'\bU score\b': 'U-Score',
     r'\bdot\b': '.',
-    r'\bthree point five\b': '3<<DOT>>5',
     r'\bnew ?line\b': '\n',
 }
+
+# Load personal mappings from mappings.local.json (gitignored)
+_LOCAL_MAPPINGS_PATH = Path(__file__).resolve().parent.parent / 'mappings.local.json'
+if _LOCAL_MAPPINGS_PATH.exists():
+    with open(_LOCAL_MAPPINGS_PATH, encoding='utf-8') as f:
+        WORD_MAPPINGS.update(json.load(f))
 
 # Trigger phrases that cause the following words to be wrapped in quotes
 # Each entry: (trigger regex, whether to keep the trigger phrase in output)

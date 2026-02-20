@@ -25,10 +25,10 @@ A fast, reliable alternative to macOS's built-in dictation, using OpenAI's Whisp
 
 ### Text Post-Processing
 
-- **Custom word corrections**: Map Whisper's common mistranscriptions to your preferred terms (e.g. "Sora" → "Suora", "Cloud Code" → "Claude-Code")
+- **Voice formatting commands**: Say "new line" for line breaks, "dash" for list bullets, "colon" for `:`, "forward slash" for `/`, "dot" for inline `.` — lets you dictate structured text like file paths, lists, and version numbers hands-free
+- **Custom word corrections**: Map Whisper's common mistranscriptions to your preferred terms via a personal `mappings.local.json` file (gitignored) — simple find-and-replace, no special syntax knowledge needed
 - **Smart quoting**: Trigger phrases like "called", "say", "a file called" automatically wrap following words in quotes
-- **Colon substitution**: Say "colon" and it types `:`
-- **Punctuation cleanup**: Standardizes spacing around punctuation, removes extra newlines
+- **Punctuation cleanup**: Standardizes spacing around punctuation, collapses redundant comma/period clusters, removes extra newlines
 
 ### Performance & Reliability
 
@@ -220,17 +220,41 @@ Pass `--model` when running from the terminal, or modify the default in `src/dic
 parser.add_argument('--model', type=str, default='small', ...)
 ```
 
+### Voice Formatting Commands
+
+These let you dictate structured text (file paths, lists, version numbers) without touching the keyboard. They are built into `src/text_postprocessor.py` and work out of the box.
+
+| Say | Output | Notes |
+|---|---|---|
+| "new line" or "newline" | line break | Retains period on previous sentence |
+| "dash." or "hyphen." | `- ` | Only at sentence boundaries (for list bullets). Whisper handles inline hyphenation automatically. |
+| "colon" | `:` | |
+| "forward slash" | `/` | Collapses spaces: "src forward slash utils" → `src/utils` |
+| "dot" | `.` | Inline: "config dot yaml" → `config.yaml`. Sentence-ending dots get normal spacing. |
+| "three point five" | `3.5` | Also works as "3 point 5" |
+
+**Disabling a command**: If any of these conflict with how you speak, remove or comment out the corresponding entry in the `WORD_MAPPINGS` dict in `src/text_postprocessor.py`. For example, if you frequently say the word "dot" literally and don't want it converted to `.`, just delete the `r'\bdot\b': '.'` line. The contextual commands ("dash."/"hyphen." at sentence boundaries and "X point Y" for numbers) are handled separately in `cleanup_text()` — comment out the relevant `re.sub` line to disable.
+
 ### Custom Word Corrections
 
-Edit `src/text_postprocessor.py` → `WORD_MAPPINGS`. Each entry is a regex pattern mapped to a replacement string:
+Separately from voice commands, you can add simple word-for-word replacements to fix Whisper mistranscriptions specific to your vocabulary (names, brands, technical terms).
 
-```python
-WORD_MAPPINGS = {
-    r'your-word': 'Corrected Word',
-    r'Cloud Code': 'Claude-Code',
-    # add your own...
+Copy the example file and add your own entries:
+
+```bash
+cp mappings.example.json mappings.local.json
+```
+
+Each entry is a pattern → replacement:
+
+```json
+{
+    "\\bmy brand\\b": "MyBrand",
+    "\\bmy-?app\\b": "MyApp"
 }
 ```
+
+This file is gitignored — your personal corrections stay local. Entries are merged with the built-in voice commands at startup. No rebuild needed — just restart the app.
 
 ### Quote Trigger Phrases
 
@@ -250,6 +274,10 @@ Say "a file called config dot json" → pastes `a file called 'config.json'`.
 ### Greedy Quote Triggers
 
 `GREEDY_QUOTE_TRIGGERS` quotes everything after the trigger phrase to the end of the utterance. Default triggers: `say`, `to say`.
+
+### Keyboard Shortcuts
+
+Shortcuts are defined in `src/keyboard.py`. The default keycodes are F1 (`122`) and F2 (`120`). To change them, edit the `keycode ==` checks in that file.
 
 ### Append-to-File Shortcuts
 
@@ -322,7 +350,8 @@ All events are logged to `~/.dictate.log`. Key entries to watch:
 - [X] Smart text post-processing (corrections, quoting, punctuation)
 - [X] Cmd+Alt+R force-restart shortcut
 - [X] PyTorch multi-threading fix for `.app` environments
-- [ ] (delayed) "New Line" / "New Paragraph" voice commands — tested, not reliable enough yet
+- [X] Voice commands: "new line", "dash"/"hyphen" (list bullets), "dot", "forward slash", numeric "point"
+- [X] Personal word corrections via gitignored `mappings.local.json`
 - [ ] Real-time transcription preview
 - [ ] Custom voice command macros (bold, italics, etc.)
 - [ ] Multi-language support with auto-detection

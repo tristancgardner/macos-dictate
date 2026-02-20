@@ -9,11 +9,13 @@ __pycache__/
 CLAUDE.md
 .claude/
 .env.local
+mappings.local.json
 .DS_Store
 .vscode/
 
-# Dev notes (kept locally in notes/)
+# Dev notes and plans (kept locally)
 notes/
+plans/
 
 # Obsolete scripts (superseded by Dictate.app + Cmd+Alt+R)
 start-dictate.command
