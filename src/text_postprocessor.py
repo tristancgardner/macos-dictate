@@ -132,7 +132,9 @@ def cleanup_text(text):
     text = re.sub(r',[ .]+', '. ', text)
     text = re.sub(r'\.[ .]+', '. ', text)
 
-    # Collapse inline punctuation using placeholder to protect dots from punctuation spacing step
+    # Collapse inline punctuation using placeholders to protect from punctuation spacing step
+    _COMMA = '<<COMMA>>'
+    text = re.sub(r'(\d),\s*(\d{3})\b', rf'\1{_COMMA}\2', text)  # protect $4,000 etc.
     _DOT = '<<DOT>>'
     text = re.sub(r'(\d+)\s+point\s+(\d+)', rf'\1{_DOT}\2', text, flags=re.IGNORECASE)
     text = re.sub(r'(\d)\.(\d)', rf'\1{_DOT}\2', text)  # protect digit.digit (e.g. 3.5)
@@ -150,6 +152,7 @@ def cleanup_text(text):
     text = re.sub(r'\s*([.,?!:])\s*', r'\1 ', text)
 
     # Restore placeholders
+    text = text.replace(_COMMA, ',')
     text = text.replace(_DOT, '.')
     text = text.replace(f' {_NL}', _NL)  # remove space punctuation step added before NL
     text = text.replace(_NL, '\n')
