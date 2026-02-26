@@ -129,7 +129,8 @@ def cleanup_text(text):
     text = re.sub(r'\b[Hh]yphen\.\s*', '- ', text)
 
     # Collapse redundant punctuation clusters (e.g. ", . ." or ". . ." from Whisper + word mapping)
-    text = re.sub(r',[ .]+', '. ', text)
+    # Note: requires at least one actual dot — avoids converting normal ", " into ". "
+    text = re.sub(r',[ .]*\.[ .]*', '. ', text)
     text = re.sub(r'\.[ .]+', '. ', text)
 
     # Collapse inline punctuation using placeholders to protect from punctuation spacing step
