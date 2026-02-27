@@ -26,3 +26,6 @@ icons/
 tmp/
 test_event_tap.py
 test_device_monitor.py
+
+
+docs/plans/
