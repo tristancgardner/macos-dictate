@@ -1,41 +1,28 @@
 import re
 import subprocess
 import os
+import json
 import time
 import threading
+from pathlib import Path
 
-WORD_MAPPINGS = {
-    r'super-?base': 'Supabase',
-    r'super base': 'Supabase',
-    r'supabase': 'Supabase',
-    r'next\.js': 'Next.js',
-    r'nextjs': 'Next.js',
-    r'mtp': 'MCP',
-    r'versal': 'Vercel',
-    r'file ID': 'file_id',
-    r'File ID': 'file_id',
-    r'result json': 'result_json',
-    r'dialog summary': 'dialog_summary',
-    r'speaker map': 'speaker_map',
-    r'dialogue': 'dialog',
-    r'dialogue summary': 'dialog_summary',
-    r'file name column': 'file_name column',
-    r'OG ASR': 'og_asr',
-    r' original ASR': 'og_asr',
-    r'original asr': 'og_asr',
-    r'O-G-A-S-R': 'og_asr',
-    r'Cloud': 'Claude',
-    r'CloudCode': 'Claude-Code',
-    r'Cloud Code': 'Claude-Code',
-    r'Club code': 'Claude-Code',
-    r'Clawed code': 'Claude-Code',
-    r'Soros': 'Suora',
-    r'Sora Studios': 'Suora Studios',
-    r'Sora': 'Suora',
-    r'route':'root',
+SIMPLE_MAPPINGS = {
     r'\bcolon\b': ':',
     r'\bColin\b': ':',
+    r'\bslash\b': '/',
 }
+
+COMPLEX_MAPPINGS = {
+    r'\bdot\b(?!\s*files?\b)': '.',
+    r'\bdot\s*files?\b': 'dotfiles',
+    r'\bnew ?line\b': '\n',
+}
+
+# Load personal mappings from mappings.local.json (gitignored)
+_LOCAL_MAPPINGS_PATH = Path(__file__).resolve().parent.parent / 'mappings.local.json'
+if _LOCAL_MAPPINGS_PATH.exists():
+    with open(_LOCAL_MAPPINGS_PATH, encoding='utf-8') as f:
+        SIMPLE_MAPPINGS.update(json.load(f))
 
 # Trigger phrases that cause the following words to be wrapped in quotes
 # Each entry: (trigger regex, whether to keep the trigger phrase in output)
@@ -133,8 +120,35 @@ def correct_variations(text, mappings):
     return text
 
 def cleanup_text(text):
-    # Correct variations first
-    text = correct_variations(text, WORD_MAPPINGS)
+    # Correct variations: simple first (order matters for complex pattern dependencies)
+    text = correct_variations(text, SIMPLE_MAPPINGS)
+    # Whisper outputs ".files" (literal period) instead of "dot files" — fix before complex mappings
+    text = re.sub(r'\.files?\b', 'dotfiles', text, flags=re.IGNORECASE)
+    text = correct_variations(text, COMPLEX_MAPPINGS)
+
+    # Clean up around newlines from "new line" word mapping, then protect with placeholder
+    _NL = '<<NL>>'
+    text = re.sub(r'(?<=[.,])\s*\n\s*[.,]?\s*', _NL, text)      # period/comma already present before \n
+    text = re.sub(r'(?<![.,])\s*\n\s*[.,]?\s*', f'.{_NL}', text)  # no period before \n, add one
+
+    # Contextual dash/hyphen: only at sentence boundaries (followed by period from Whisper)
+    text = re.sub(r'\b[Dd]ash\.\s*', '- ', text)
+    text = re.sub(r'\b[Hh]yphen\.\s*', '- ', text)
+
+    # Collapse redundant punctuation clusters (e.g. ", . ." or ". . ." from Whisper + word mapping)
+    # Note: requires at least one actual dot — avoids converting normal ", " into ". "
+    text = re.sub(r',[ .]*\.[ .]*', '. ', text)
+    text = re.sub(r'\.[ .]+', '. ', text)
+
+    # Collapse inline punctuation using placeholders to protect from punctuation spacing step
+    _COMMA = '<<COMMA>>'
+    text = re.sub(r'(\d),\s*(\d{3})\b', rf'\1{_COMMA}\2', text)  # protect $4,000 etc.
+    _DOT = '<<DOT>>'
+    text = re.sub(r'(\d+)\s+point\s+(\d+)', rf'\1{_DOT}\2', text, flags=re.IGNORECASE)
+    text = re.sub(r'(\d)\.(\d)', rf'\1{_DOT}\2', text)  # protect digit.digit (e.g. 3.5)
+    text = re.sub(r'(\w)\.([a-z])', rf'\1{_DOT}\2', text)  # protect word.lowercase (e.g. Next.js, public.master)
+    text = re.sub(r'(\w)\s+/\s+(\w)', r'\1/\2', text)
+    text = re.sub(r'(\w)\s+\.\s+(\w)', rf'\1{_DOT}\2', text)
 
     # Apply greedy quoting first (say -> quote everything remaining)
     text = apply_greedy_quotes(text)
@@ -145,8 +159,14 @@ def cleanup_text(text):
     # Single spaces after punctuation
     text = re.sub(r'\s*([.,?!:])\s*', r'\1 ', text)
 
-    # Remove extra punctuation before a newline
-    text = re.sub(r'[.,]\s*\n', r'\n', text)
+    # Restore placeholders
+    text = text.replace(_COMMA, ',')
+    text = text.replace(_DOT, '.')
+    text = text.replace(f' {_NL}', _NL)  # remove space punctuation step added before NL
+    text = text.replace(_NL, '\n')
+
+    # Remove trailing commas before a newline (keep periods)
+    text = re.sub(r',\s*\n', r'.\n', text)
 
     # Standardize multiple newlines => double newline
     text = re.sub(r'\n+', '\n\n', text)

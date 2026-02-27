@@ -1,0 +1,5 @@
+{
+    "Cloud Code": "Claude-Code",
+    "\\bmy brand\\b": "MyBrand",
+    "\\bmy-?app\\b": "MyApp"
+}
