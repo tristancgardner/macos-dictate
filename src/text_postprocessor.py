@@ -6,11 +6,15 @@ import time
 import threading
 from pathlib import Path
 
-WORD_MAPPINGS = {
+SIMPLE_MAPPINGS = {
     r'\bcolon\b': ':',
     r'\bColin\b': ':',
-    r'\bforward slash\b': '/',
-    r'\bdot\b': '.',
+    r'\bslash\b': '/',
+}
+
+COMPLEX_MAPPINGS = {
+    r'\bdot\b(?!\s*files?\b)': '.',
+    r'\bdot\s*files?\b': 'dotfiles',
     r'\bnew ?line\b': '\n',
 }
 
@@ -18,7 +22,7 @@ WORD_MAPPINGS = {
 _LOCAL_MAPPINGS_PATH = Path(__file__).resolve().parent.parent / 'mappings.local.json'
 if _LOCAL_MAPPINGS_PATH.exists():
     with open(_LOCAL_MAPPINGS_PATH, encoding='utf-8') as f:
-        WORD_MAPPINGS.update(json.load(f))
+        SIMPLE_MAPPINGS.update(json.load(f))
 
 # Trigger phrases that cause the following words to be wrapped in quotes
 # Each entry: (trigger regex, whether to keep the trigger phrase in output)
@@ -116,8 +120,11 @@ def correct_variations(text, mappings):
     return text
 
 def cleanup_text(text):
-    # Correct variations first
-    text = correct_variations(text, WORD_MAPPINGS)
+    # Correct variations: simple first (order matters for complex pattern dependencies)
+    text = correct_variations(text, SIMPLE_MAPPINGS)
+    # Whisper outputs ".files" (literal period) instead of "dot files" — fix before complex mappings
+    text = re.sub(r'\.files?\b', 'dotfiles', text, flags=re.IGNORECASE)
+    text = correct_variations(text, COMPLEX_MAPPINGS)
 
     # Clean up around newlines from "new line" word mapping, then protect with placeholder
     _NL = '<<NL>>'

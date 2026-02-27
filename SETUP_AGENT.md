@@ -25,7 +25,7 @@ Run the app with:
 | File | Purpose |
 |---|---|
 | `src/dictate.py` | Main app (~1150 lines). All recording, transcription, keyboard shortcuts, watchdog, and threading logic. |
-| `src/text_postprocessor.py` | Text cleanup pipeline: voice commands (`WORD_MAPPINGS`), smart quoting (`QUOTE_TRIGGERS`, `GREEDY_QUOTE_TRIGGERS`), punctuation normalization. Loads personal corrections from `mappings.local.json`. |
+| `src/text_postprocessor.py` | Text cleanup pipeline: voice commands (`SIMPLE_MAPPINGS` + `COMPLEX_MAPPINGS`), smart quoting (`QUOTE_TRIGGERS`, `GREEDY_QUOTE_TRIGGERS`), punctuation normalization. Loads personal corrections from `mappings.local.json` into `SIMPLE_MAPPINGS`. |
 | `src/keyboard.py` | Keyboard event tap and shortcut handler. Keycodes for F1/F2 and modifier combos defined here. |
 | `src/device_monitor.py` | CoreAudio device change detection via ctypes. Handles hot-swap microphone switching with CFRunLoop listener + polling fallback. |
 | `build-assets/setup.py` | py2app config for building `Dictate.app`. Plist settings, icon, package list. |
@@ -63,7 +63,7 @@ Run the app with:
 
 ## Customization Points
 
-- **Word corrections**: `WORD_MAPPINGS` in `src/text_postprocessor.py` contains built-in generic voice commands (dot, forward slash, newline, colon). Users add personal corrections in `mappings.local.json` (copy from `mappings.example.json`), which is merged at import time.
+- **Word corrections**: `src/text_postprocessor.py` has two mapping dicts. `SIMPLE_MAPPINGS` contains direct word swaps (colon, slash, etc.) — these run first. `COMPLEX_MAPPINGS` contains context-sensitive patterns with lookaheads (dot, dotfiles, new line) — these run second and depend on simple corrections being applied first. Users add personal corrections in `mappings.local.json` (copy from `mappings.example.json`), which is merged into `SIMPLE_MAPPINGS` at import time.
 - **Quote triggers**: `QUOTE_TRIGGERS` list in `src/text_postprocessor.py` — trigger phrases that auto-wrap following words in quotes
 - **Greedy quote triggers**: `GREEDY_QUOTE_TRIGGERS` in `src/text_postprocessor.py` — quotes everything to end of utterance
 - **Keyboard shortcuts**: Keycodes in `src/keyboard.py` — F1 (`122`), F2 (`120`), with modifier checks for Cmd/Alt combos
@@ -87,8 +87,8 @@ Don't assume what the contributor wants — ask before making changes to voice c
 - `OMP_NUM_THREADS` must be set **before** `import torch` — placing it after has no effect
 - Never call `refresh_sounddevice()` unconditionally in the watchdog poll loop — it reinitializes PortAudio every call and will freeze the app
 - Never hardcode personal file paths in source — use `.env.local` environment variables
-- `WORD_MAPPINGS` in source should only contain generic voice commands (dot, colon, etc.) — user-specific corrections belong in `mappings.local.json`
-- `text_postprocessor.py` uses `<<DOT>>` and `<<NL>>` placeholders internally to protect inline dots and newlines from the punctuation spacing step — don't use these strings in mappings
+- `SIMPLE_MAPPINGS` and `COMPLEX_MAPPINGS` in source should only contain generic voice commands (dot, colon, slash, etc.) — user-specific corrections belong in `mappings.local.json`
+- `text_postprocessor.py` uses `<<DOT>>`, `<<COMMA>>`, and `<<NL>>` placeholders internally to protect inline dots, thousand-separator commas, and newlines from the punctuation spacing step — don't use these strings in mappings
 
 ## Log File
 

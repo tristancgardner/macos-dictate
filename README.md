@@ -25,7 +25,7 @@ A fast, reliable alternative to macOS's built-in dictation, using OpenAI's Whisp
 
 ### Text Post-Processing
 
-- **Voice formatting commands**: Say "new line" for line breaks, "dash" for list bullets, "colon" for `:`, "forward slash" for `/`, "dot" for inline `.` — lets you dictate structured text like file paths, lists, and version numbers hands-free
+- **Voice formatting commands**: Say "new line" for line breaks, "dash" for list bullets, "colon" for `:`, "slash" for `/`, "dot" for inline `.` — lets you dictate structured text like file paths, lists, and version numbers hands-free
 - **Custom word corrections**: Map Whisper's common mistranscriptions to your preferred terms via a personal `mappings.local.json` file (gitignored) — simple find-and-replace, no special syntax knowledge needed
 - **Smart quoting**: Trigger phrases like "called", "say", "a file called" automatically wrap following words in quotes
 - **Punctuation cleanup**: Standardizes spacing around punctuation, collapses redundant comma/period clusters, removes extra newlines
@@ -229,11 +229,11 @@ These let you dictate structured text (file paths, lists, version numbers) witho
 | "new line" or "newline" | line break | Retains period on previous sentence |
 | "dash." or "hyphen." | `- ` | Only at sentence boundaries (for list bullets). Whisper handles inline hyphenation automatically. |
 | "colon" | `:` | |
-| "forward slash" | `/` | Collapses spaces: "src forward slash utils" → `src/utils` |
+| "slash" | `/` | Collapses spaces: "src slash utils" → `src/utils` |
 | "dot" | `.` | Inline: "config dot yaml" → `config.yaml`. Sentence-ending dots get normal spacing. |
 | "three point five" | `3.5` | Also works as "3 point 5" |
 
-**Disabling a command**: If any of these conflict with how you speak, remove or comment out the corresponding entry in the `WORD_MAPPINGS` dict in `src/text_postprocessor.py`. For example, if you frequently say the word "dot" literally and don't want it converted to `.`, just delete the `r'\bdot\b': '.'` line. The contextual commands ("dash."/"hyphen." at sentence boundaries and "X point Y" for numbers) are handled separately in `cleanup_text()` — comment out the relevant `re.sub` line to disable.
+**Disabling a command**: If any of these conflict with how you speak, remove or comment out the corresponding entry in `SIMPLE_MAPPINGS` or `COMPLEX_MAPPINGS` in `src/text_postprocessor.py`. Simple mappings are direct word swaps (colon → `:`), while complex mappings use lookaheads for context-sensitive behavior (e.g. "dot" → `.` except before "files"). The contextual commands ("dash."/"hyphen." at sentence boundaries and "X point Y" for numbers) are handled separately in `cleanup_text()` — comment out the relevant `re.sub` line to disable.
 
 ### Custom Word Corrections
 
@@ -350,7 +350,7 @@ All events are logged to `~/.dictate.log`. Key entries to watch:
 - [X] Smart text post-processing (corrections, quoting, punctuation)
 - [X] Cmd+Alt+R force-restart shortcut
 - [X] PyTorch multi-threading fix for `.app` environments
-- [X] Voice commands: "new line", "dash"/"hyphen" (list bullets), "dot", "forward slash", numeric "point"
+- [X] Voice commands: "new line", "dash"/"hyphen" (list bullets), "dot", "slash", numeric "point"
 - [X] Personal word corrections via gitignored `mappings.local.json`
 - [ ] Real-time transcription preview
 - [ ] Custom voice command macros (bold, italics, etc.)
