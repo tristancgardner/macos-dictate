@@ -53,7 +53,7 @@ def parse_arguments():
     parser.add_argument(
         '--model',
         type=str,
-        default='medium',
+        default='small',
         choices=['tiny', 'base', 'small', 'medium', 'large', 'turbo'],
         help='Choose the Whisper model size.'
     )
@@ -218,6 +218,7 @@ keyboard_mod.APPEND_BULLET_FILE_2 = APPEND_BULLET_FILE_2
 keyboard_mod._toggle_recording = toggle_recording
 keyboard_mod._repaste_last_transcription = transcription.repaste_last_transcription
 keyboard_mod._set_append_target = _set_append_target
+keyboard_mod._set_auto_enter = lambda v: setattr(transcription, 'auto_enter', v)
 
 transcription.APPEND_BULLET_FILE = APPEND_BULLET_FILE
 

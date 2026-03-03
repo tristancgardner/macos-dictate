@@ -13,11 +13,11 @@ SIMPLE_MAPPINGS = {
 }
 
 COMPLEX_MAPPINGS = {
-    r'\bdot\b(?!\s*files?\b)': '.',
     r'\bdot\s*files?\b': 'dotfiles',
+    r'\bdot\b(?!\s*files?\b)': '.',
     r'\bnew ?line\b': '\n',
+    r'\bspec\w+\b': 'specweave',
 }
-
 # Load personal mappings from mappings.local.json (gitignored)
 _LOCAL_MAPPINGS_PATH = Path(__file__).resolve().parent.parent / 'mappings.local.json'
 if _LOCAL_MAPPINGS_PATH.exists():
