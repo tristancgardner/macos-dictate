@@ -16,7 +16,9 @@ COMPLEX_MAPPINGS = {
     r'\bdot\s*files?\b': 'dotfiles',
     r'\bdot\b(?!\s*files?\b)': '.',
     r'\bnew ?line\b': '\n',
-    r'\bspec\w+\b': 'specweave',
+    r'\bspec\s*weave\b': 'specweave',
+    r'\bspec\s*wave\b': 'specweave',
+    r'\bspeck\s*weave\b': 'specweave',
 }
 # Load personal mappings from mappings.local.json (gitignored)
 _LOCAL_MAPPINGS_PATH = Path(__file__).resolve().parent.parent / 'mappings.local.json'
