@@ -13,7 +13,8 @@ from datetime import datetime
 from process import show_notification
 from audio import audio_queue, state_lock
 from text_postprocessor import cleanup_text, send_text_to_active_app
-import whisper_backend
+
+
 
 # Transcription state
 transcribing = False
@@ -130,7 +131,7 @@ def transcribe_audio():
 
         def transcribe_with_timeout():
             try:
-                result_container["result"] = whisper_backend.transcribe(model, audio)
+                result_container["result"] = model.transcribe(audio, fp16=False)
                 result_container["success"] = True
             except Exception as e:
                 result_container["error"] = str(e)

@@ -18,7 +18,7 @@ import torch
 torch.set_num_threads(8)
 torch.set_num_interop_threads(4)
 
-import whisper_backend
+import whisper
 import sounddevice as sd
 import threading
 import time
@@ -53,7 +53,7 @@ def parse_arguments():
     parser.add_argument(
         '--model',
         type=str,
-        default='medium',
+        default='small',
         choices=['tiny', 'base', 'small', 'medium', 'large', 'turbo'],
         help='Choose the Whisper model size.'
     )
@@ -288,7 +288,7 @@ if __name__ == "__main__":
 
         # Load the Whisper model
         logging.info(f"Loading Whisper model '{model_size}'...")
-        model = whisper_backend.load_model(model_size)
+        model = whisper.load_model(model_size)
         transcription.model = model
         logging.info(f"Model loaded successfully. torch.get_num_threads()={torch.get_num_threads()}, "
                      f"torch.get_num_interop_threads()={torch.get_num_interop_threads()}, "
