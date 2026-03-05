@@ -67,3 +67,5 @@ yarn-error.log*
 .specweave/docs-site-internal/
 .claude-plugin/
 plugins/
+.specweave/state/
+.specweave/logs/

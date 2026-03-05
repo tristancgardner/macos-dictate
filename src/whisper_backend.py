@@ -21,6 +21,7 @@ if BACKEND == "openai-whisper":
 
 
 def load_model(model_size):
+    logging.info(f"whisper_backend: loading '{model_size}' with backend='{BACKEND}'")
     if BACKEND == "faster-whisper":
         return WhisperModel(model_size, device="cpu", compute_type="int8")
     else:
