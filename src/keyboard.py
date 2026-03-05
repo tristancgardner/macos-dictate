@@ -24,6 +24,7 @@ _toggle_recording = None
 _repaste_last_transcription = None
 _get_append_target = None
 _set_append_target = None
+_set_auto_enter = None
 
 
 def tap_callback(proxy, type_, event, refcon):
@@ -36,6 +37,7 @@ def tap_callback(proxy, type_, event, refcon):
     if keycode == 122:  # F1
         cmd_pressed = (flags & Quartz.kCGEventFlagMaskCommand) == Quartz.kCGEventFlagMaskCommand
         alt_pressed = (flags & Quartz.kCGEventFlagMaskAlternate) == Quartz.kCGEventFlagMaskAlternate
+        shift_pressed = (flags & Quartz.kCGEventFlagMaskShift) == Quartz.kCGEventFlagMaskShift
         if cmd_pressed and APPEND_BULLET_FILE:
             _set_append_target(APPEND_BULLET_FILE)
             logging.info("Cmd+F1 detected: append-to-file mode activated.")
@@ -45,6 +47,10 @@ def tap_callback(proxy, type_, event, refcon):
             _set_append_target(APPEND_BULLET_FILE_2)
             logging.info("Alt+F1 detected: append to secondary TODO file.")
             show_notification("Dictation", "Recording for secondary TODO...")
+            _toggle_recording()
+        elif shift_pressed:
+            _set_auto_enter(True)
+            logging.info("Shift+F1 detected: auto-enter mode activated.")
             _toggle_recording()
         else:
             logging.info("F1 key detected.")

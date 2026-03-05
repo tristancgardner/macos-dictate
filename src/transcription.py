@@ -1,6 +1,7 @@
 """Audio transcription and text output."""
 
 import logging
+import os
 import threading
 import time
 import re
@@ -17,6 +18,7 @@ from text_postprocessor import cleanup_text, send_text_to_active_app
 transcribing = False
 transcribe_start = None
 append_target = None  # When set, transcription appends as bullet to this file path
+auto_enter = False    # When set, press Enter after pasting transcription
 
 # Set by dictate.py after model load
 model = None
@@ -86,7 +88,7 @@ def repaste_last_transcription():
 
 
 def transcribe_audio():
-    global transcribing, append_target, transcribe_start
+    global transcribing, append_target, auto_enter, transcribe_start
     transcribe_start_time = datetime.now()
     max_transcribe_time = 60
 
@@ -171,6 +173,10 @@ def transcribe_audio():
                 append_bullet_to_file(text, append_target)
             else:
                 send_text_to_active_app(text + " ")
+                if auto_enter:
+                    time.sleep(0.2)
+                    os.system('osascript -e \'tell application "System Events" to key code 36\'')
+                    logging.info("Auto-enter: sent Return keypress after paste.")
         else:
             logging.info("No text to paste (empty transcription).")
             show_notification("Dictation", "No text detected")
@@ -185,3 +191,4 @@ def transcribe_audio():
             transcribing = False
             transcribe_start = None
             append_target = None
+            auto_enter = False

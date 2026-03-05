@@ -13,11 +13,11 @@ SIMPLE_MAPPINGS = {
 }
 
 COMPLEX_MAPPINGS = {
-    r'\bdot\b(?!\s*files?\b)': '.',
     r'\bdot\s*files?\b': 'dotfiles',
+    r'\bdot\b(?!\s*files?\b)': '.',
     r'\bnew ?line\b': '\n',
+    r'\bspec\w+\b': 'specweave',
 }
-
 # Load personal mappings from mappings.local.json (gitignored)
 _LOCAL_MAPPINGS_PATH = Path(__file__).resolve().parent.parent / 'mappings.local.json'
 if _LOCAL_MAPPINGS_PATH.exists():
@@ -49,30 +49,31 @@ STOP_WORDS = {
 }
 
 # Trigger phrases that quote everything remaining (greedy, to end of text)
-GREEDY_QUOTE_TRIGGERS = [
-    r'to say',
-    r'\bsay',
-]
-
-def apply_greedy_quotes(text):
-    """Wrap everything after greedy trigger phrases in single quotes."""
-    trigger_pattern = '|'.join(GREEDY_QUOTE_TRIGGERS)
-    pattern = rf'(?i)({trigger_pattern})\s+(.+)'
-
-    def replace_match(m):
-        trigger = m.group(1)
-        rest = m.group(2).strip().rstrip('.,;:!?')
-        trailing = m.group(2).strip()
-        trailing_punct = trailing[-1] if trailing and trailing[-1] in '.,;:!?' else ''
-        # Capitalize first letter of quoted content
-        if rest:
-            rest = rest[0].upper() + rest[1:]
-        result = f"{trigger} '{rest}'"
-        if trailing_punct:
-            result += trailing_punct
-        return result
-
-    return re.sub(pattern, replace_match, text)
+# DISABLED: Testing without greedy 'say' quoting — re-enable if needed
+# GREEDY_QUOTE_TRIGGERS = [
+#     r'to say',
+#     r'\bsay',
+# ]
+#
+# def apply_greedy_quotes(text):
+#     """Wrap everything after greedy trigger phrases in single quotes."""
+#     trigger_pattern = '|'.join(GREEDY_QUOTE_TRIGGERS)
+#     pattern = rf'(?i)({trigger_pattern})\s+(.+)'
+#
+#     def replace_match(m):
+#         trigger = m.group(1)
+#         rest = m.group(2).strip().rstrip('.,;:!?')
+#         trailing = m.group(2).strip()
+#         trailing_punct = trailing[-1] if trailing and trailing[-1] in '.,;:!?' else ''
+#         # Capitalize first letter of quoted content
+#         if rest:
+#             rest = rest[0].upper() + rest[1:]
+#         result = f"{trigger} '{rest}'"
+#         if trailing_punct:
+#             result += trailing_punct
+#         return result
+#
+#     return re.sub(pattern, replace_match, text)
 
 def apply_contextual_quotes(text):
     """Wrap words following trigger phrases in single quotes."""
@@ -151,7 +152,7 @@ def cleanup_text(text):
     text = re.sub(r'(\w)\s+\.\s+(\w)', rf'\1{_DOT}\2', text)
 
     # Apply greedy quoting first (say -> quote everything remaining)
-    text = apply_greedy_quotes(text)
+    # DISABLED: text = apply_greedy_quotes(text)
 
     # Apply contextual quoting (before punctuation cleanup)
     text = apply_contextual_quotes(text)
