@@ -12,54 +12,42 @@ CLAUDE.md
 mappings.local.json
 .DS_Store
 .vscode/
-
 # Dev notes and plans (kept locally)
 notes/
 plans/
-
 # Obsolete scripts (superseded by Dictate.app + Cmd+Alt+R)
 start-dictate.command
 restart-dictate.command
-
 # Misc
 icons/
 tmp/
 test_event_tap.py
 test_device_monitor.py
-
-
 docs/plans/
 docs/architecture_master.md
-
 # Auto-detected by SpecWeave
 # Dependencies
 node_modules/
-
 # Environment
 .env
 .env.*.local
 *.env
-
 # IDEs
 .idea/
 *.swp
 *.swo
 *~
-
 # OS
 Thumbs.db
 desktop.ini
-
 # Logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
 # Temporary
 *.tmp
 .temp/
-
 # SpecWeave
 .specweave/cache/
 .specweave/increments/*/logs/
