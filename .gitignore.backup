@@ -1,0 +1,32 @@
+# Build artifacts
+venv/
+build/
+dist/
+*.pyc
+__pycache__/
+
+# Personal config
+CLAUDE.md
+.claude/
+.env.local
+mappings.local.json
+.DS_Store
+.vscode/
+
+# Dev notes and plans (kept locally)
+notes/
+plans/
+
+# Obsolete scripts (superseded by Dictate.app + Cmd+Alt+R)
+start-dictate.command
+restart-dictate.command
+
+# Misc
+icons/
+tmp/
+test_event_tap.py
+test_device_monitor.py
+
+
+docs/plans/
+docs/architecture_master.md
