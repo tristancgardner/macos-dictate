@@ -2,7 +2,7 @@
 increment: INC-001-faster-whisper-backend
 title: "Faster-Whisper Backend Abstraction"
 type: feature
-status: planning
+status: abandoned
 priority: high
 created: 2026-03-05
 ---

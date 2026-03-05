@@ -10,6 +10,9 @@ title: Faster-Whisper Backend Abstraction
 - [x] **T3** Update `src/transcription.py` to use `whisper_backend.transcribe()` [AC-4]
 - [x] **T4** Install `faster-whisper` in venv [AC-6]
 - [x] **T5** Add `WHISPER_BACKEND=faster-whisper` to `.env.local` [AC-2]
-- [ ] **T6** Smoke test: transcribe with faster-whisper, verify paste + auto-enter [AC-5]
-- [ ] **T7** Smoke test: switch to openai-whisper via env var, verify still works [AC-2, AC-5]
-- [ ] **T8** Compare transcription times in `~/.dictate.log` for both backends [AC-6]
+- [x] **T6** Smoke test: transcribe with faster-whisper, verify paste + auto-enter [AC-5] — TESTED, works but no speed gain
+- [x] **T7** Smoke test: switch to openai-whisper via env var, verify still works [AC-2, AC-5] — verified
+- [x] **T8** Compare transcription times in `~/.dictate.log` for both backends [AC-6] — no improvement on Apple Silicon CPU
+
+## Outcome: ABANDONED
+faster-whisper showed no transcription speed improvement over openai-whisper on Apple Silicon (M-series) CPU. The "4x faster" claims apply to CUDA/GPU setups. All changes reverted, back to openai-whisper + small model.
