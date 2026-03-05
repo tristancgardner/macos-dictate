@@ -60,10 +60,7 @@ yarn-error.log*
 *.tmp
 .temp/
 
-# SpecWeave
-.specweave/cache/
-.specweave/increments/*/logs/
-.specweave/increments/*/test-results/
-.specweave/docs-site-internal/
+# SpecWeave (dev-only, not on main)
+.specweave/
 .claude-plugin/
 plugins/
