@@ -6,6 +6,7 @@ import logging
 import threading
 import subprocess
 import time
+from datetime import datetime
 
 import Quartz
 
@@ -14,6 +15,10 @@ from process import show_notification, cleanup_lock_file
 # Event tap status - signals main thread if event tap fails
 event_tap_ready = threading.Event()
 event_tap_failed = threading.Event()
+
+# Event tap heartbeat - updated on every callback, monitored by watchdog
+tap_heartbeat = datetime.now()
+tap_heartbeat_lock = threading.Lock()
 
 # Set by dictate.py after env loading
 APPEND_BULLET_FILE = None
@@ -27,9 +32,20 @@ _set_append_target = None
 _set_auto_enter = None
 
 
+def _dispatch(fn, *args):
+    """Run a function on a background thread so the event tap callback returns immediately."""
+    threading.Thread(target=fn, args=args, daemon=True).start()
+
+
 def tap_callback(proxy, type_, event, refcon):
+    global tap_heartbeat
+
     keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
     flags = Quartz.CGEventGetFlags(event)
+
+    # Update heartbeat on every key event so watchdog knows the tap is alive
+    with tap_heartbeat_lock:
+        tap_heartbeat = datetime.now()
 
     # Cmd+F1 => Append to APPEND_BULLET_FILE (from .env.local)
     # Alt+F1 => Append to bizdev TODO
@@ -41,29 +57,27 @@ def tap_callback(proxy, type_, event, refcon):
         if cmd_pressed and APPEND_BULLET_FILE:
             _set_append_target(APPEND_BULLET_FILE)
             logging.info("Cmd+F1 detected: append-to-file mode activated.")
-            show_notification("Dictation", "Recording for TODO append...")
-            _toggle_recording()
+            _dispatch(_toggle_recording)
         elif alt_pressed and APPEND_BULLET_FILE_2:
             _set_append_target(APPEND_BULLET_FILE_2)
             logging.info("Alt+F1 detected: append to secondary TODO file.")
-            show_notification("Dictation", "Recording for secondary TODO...")
-            _toggle_recording()
+            _dispatch(_toggle_recording)
         elif shift_pressed:
             _set_auto_enter(True)
             logging.info("Shift+F1 detected: auto-enter mode activated.")
-            _toggle_recording()
+            _dispatch(_toggle_recording)
         else:
             logging.info("F1 key detected.")
-            _toggle_recording()
+            _dispatch(_toggle_recording)
         return None
 
     # F2 key => Repaste last transcription
     if keycode == 120:  # F2
         logging.info("F2 key detected.")
-        _repaste_last_transcription()
+        _dispatch(_repaste_last_transcription)
         return None
 
-    # Option+Shift+D => Quit
+    # Option+Shift+D => Quit (runs inline — fast, no risk of blocking)
     if type_ == Quartz.kCGEventKeyDown and keycode == 2:  # 'D'
         shift_pressed = (flags & Quartz.kCGEventFlagMaskShift) == Quartz.kCGEventFlagMaskShift
         option_pressed = (flags & Quartz.kCGEventFlagMaskAlternate) == Quartz.kCGEventFlagMaskAlternate
@@ -73,7 +87,7 @@ def tap_callback(proxy, type_, event, refcon):
             cleanup_lock_file()
             os._exit(0)
 
-    # Cmd+Alt+R => Force restart (kill and relaunch)
+    # Cmd+Alt+R => Force restart (runs inline — must complete before exit)
     if type_ == Quartz.kCGEventKeyDown and keycode == 15:  # 'R'
         cmd_pressed = (flags & Quartz.kCGEventFlagMaskCommand) == Quartz.kCGEventFlagMaskCommand
         alt_pressed = (flags & Quartz.kCGEventFlagMaskAlternate) == Quartz.kCGEventFlagMaskAlternate
