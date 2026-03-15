@@ -16,9 +16,14 @@ from process import show_notification, cleanup_lock_file
 event_tap_ready = threading.Event()
 event_tap_failed = threading.Event()
 
-# Event tap heartbeat - updated on every callback, monitored by watchdog
+# Event tap heartbeat - updated by a CFRunLoop timer in the tap thread,
+# NOT by key events. This way the heartbeat stays fresh even when the user
+# isn't typing, and only goes stale if the tap thread itself is dead/frozen.
 tap_heartbeat = datetime.now()
 tap_heartbeat_lock = threading.Lock()
+
+# Reference to the tap so we can re-enable it if macOS disables it
+_event_tap = None
 
 # Set by dictate.py after env loading
 APPEND_BULLET_FILE = None
@@ -37,15 +42,28 @@ def _dispatch(fn, *args):
     threading.Thread(target=fn, args=args, daemon=True).start()
 
 
-def tap_callback(proxy, type_, event, refcon):
+def _tap_heartbeat_timer_callback(timer, info):
+    """Called by CFRunLoop timer every 30s to prove the tap thread is alive."""
     global tap_heartbeat
+    with tap_heartbeat_lock:
+        tap_heartbeat = datetime.now()
+
+
+def tap_callback(proxy, type_, event, refcon):
+    # Handle tap disabled by macOS (timeout or user input)
+    if type_ == Quartz.kCGEventTapDisabledByTimeout:
+        logging.warning("Event tap disabled by macOS timeout — re-enabling")
+        if _event_tap is not None:
+            Quartz.CGEventTapEnable(_event_tap, True)
+        return event
+    if type_ == Quartz.kCGEventTapDisabledByUserInput:
+        logging.info("Event tap disabled by user input — re-enabling")
+        if _event_tap is not None:
+            Quartz.CGEventTapEnable(_event_tap, True)
+        return event
 
     keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
     flags = Quartz.CGEventGetFlags(event)
-
-    # Update heartbeat on every key event so watchdog knows the tap is alive
-    with tap_heartbeat_lock:
-        tap_heartbeat = datetime.now()
 
     # Cmd+F1 => Append to APPEND_BULLET_FILE (from .env.local)
     # Alt+F1 => Append to bizdev TODO
@@ -121,6 +139,8 @@ def tap_callback(proxy, type_, event, refcon):
 
 
 def run_event_tap():
+    global _event_tap
+
     event_mask = Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown)
     tap = Quartz.CGEventTapCreate(
         Quartz.kCGSessionEventTap,
@@ -135,12 +155,30 @@ def run_event_tap():
         event_tap_failed.set()
         return
 
+    _event_tap = tap
+
     run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
+    run_loop = Quartz.CFRunLoopGetCurrent()
     Quartz.CFRunLoopAddSource(
-        Quartz.CFRunLoopGetCurrent(),
+        run_loop,
         run_loop_source,
         Quartz.kCFRunLoopCommonModes
     )
+
+    # Add a 30s repeating timer to update the heartbeat, proving this thread is alive.
+    # This fires even when no keys are pressed, so the watchdog can distinguish
+    # "user idle" from "tap thread frozen".
+    timer = Quartz.CFRunLoopTimerCreate(
+        None,                           # allocator
+        Quartz.CFAbsoluteTimeGetCurrent() + 30,  # first fire
+        30.0,                           # interval (seconds)
+        0,                              # flags
+        0,                              # order
+        _tap_heartbeat_timer_callback,  # callback
+        None                            # context
+    )
+    Quartz.CFRunLoopAddTimer(run_loop, timer, Quartz.kCFRunLoopCommonModes)
+
     Quartz.CGEventTapEnable(tap, True)
     logging.info("Event tap started successfully.")
     event_tap_ready.set()

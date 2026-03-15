@@ -29,8 +29,9 @@ audio_timeout = 5
 last_polled_device_name = None
 watchdog_active = True
 
-# Event tap unresponsive threshold (seconds without any keypress going through the tap)
-EVENT_TAP_TIMEOUT = 300  # 5 minutes with zero key events = likely frozen
+# Event tap thread heartbeat timeout — the tap thread updates its heartbeat every 30s
+# via a CFRunLoop timer. If this exceeds the timeout, the thread itself is dead/frozen.
+EVENT_TAP_TIMEOUT = 120  # 2 minutes without a timer tick = thread is dead
 
 # Set by dictate.py
 _get_device_arg = None
@@ -101,12 +102,13 @@ def watchdog_monitor():
                         transcription.append_target = None
                     show_notification("Dictation Error", "Transcription timed out, ready for new recording")
 
-            # Check event tap heartbeat — if no key events for EVENT_TAP_TIMEOUT, the tap is frozen
-            from keyboard import tap_heartbeat, tap_heartbeat_lock
-            with tap_heartbeat_lock:
-                tap_age = (datetime.now() - tap_heartbeat).total_seconds()
+            # Check event tap heartbeat — timer in the tap thread updates this every 30s.
+            # If it stops updating, the tap thread is dead/frozen (not just idle).
+            import keyboard as keyboard_mod_ref
+            with keyboard_mod_ref.tap_heartbeat_lock:
+                tap_age = (datetime.now() - keyboard_mod_ref.tap_heartbeat).total_seconds()
             if tap_age > EVENT_TAP_TIMEOUT:
-                logging.error(f"Event tap unresponsive for {tap_age:.0f}s — auto-restarting app")
+                logging.error(f"Event tap thread unresponsive for {tap_age:.0f}s — auto-restarting app")
                 show_notification("Dictation", "Event tap frozen, restarting...")
                 _force_restart()
 
