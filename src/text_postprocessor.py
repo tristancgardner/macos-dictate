@@ -10,13 +10,16 @@ SIMPLE_MAPPINGS = {
     r'\bcolon\b': ':',
     r'\bColin\b': ':',
     r'\bslash\b': '/',
+    r'\bclock code\b': 'Claude Code',
 }
 
 COMPLEX_MAPPINGS = {
     r'\bdot\s*files?\b': 'dotfiles',
     r'\bdot\b(?!\s*files?\b)': '.',
     r'\bnew ?line\b': '\n',
-    r'\bspec\w+\b': 'specweave',
+    r'\bspec\s*weave\b': 'specweave',
+    r'\bspec\s*wave\b': 'specweave',
+    r'\bspeck\s*weave\b': 'specweave',
 }
 # Load personal mappings from mappings.local.json (gitignored)
 _LOCAL_MAPPINGS_PATH = Path(__file__).resolve().parent.parent / 'mappings.local.json'
@@ -123,6 +126,8 @@ def correct_variations(text, mappings):
 def cleanup_text(text):
     # Correct variations: simple first (order matters for complex pattern dependencies)
     text = correct_variations(text, SIMPLE_MAPPINGS)
+    # Clean stray punctuation after colon from "colon" simple mapping: ", : ." or ": ." → ":"
+    text = re.sub(r',?\s*:\s*[.,]', ':', text)
     # Whisper outputs ".files" (literal period) instead of "dot files" — fix before complex mappings
     text = re.sub(r'\.files?\b', 'dotfiles', text, flags=re.IGNORECASE)
     text = correct_variations(text, COMPLEX_MAPPINGS)

@@ -6,6 +6,7 @@ import logging
 import threading
 import subprocess
 import time
+from datetime import datetime
 
 import Quartz
 
@@ -14,6 +15,15 @@ from process import show_notification, cleanup_lock_file
 # Event tap status - signals main thread if event tap fails
 event_tap_ready = threading.Event()
 event_tap_failed = threading.Event()
+
+# Event tap heartbeat - updated by a CFRunLoop timer in the tap thread,
+# NOT by key events. This way the heartbeat stays fresh even when the user
+# isn't typing, and only goes stale if the tap thread itself is dead/frozen.
+tap_heartbeat = datetime.now()
+tap_heartbeat_lock = threading.Lock()
+
+# Reference to the tap so we can re-enable it if macOS disables it
+_event_tap = None
 
 # Set by dictate.py after env loading
 APPEND_BULLET_FILE = None
@@ -27,7 +37,31 @@ _set_append_target = None
 _set_auto_enter = None
 
 
+def _dispatch(fn, *args):
+    """Run a function on a background thread so the event tap callback returns immediately."""
+    threading.Thread(target=fn, args=args, daemon=True).start()
+
+
+def _tap_heartbeat_timer_callback(timer, info):
+    """Called by CFRunLoop timer every 30s to prove the tap thread is alive."""
+    global tap_heartbeat
+    with tap_heartbeat_lock:
+        tap_heartbeat = datetime.now()
+
+
 def tap_callback(proxy, type_, event, refcon):
+    # Handle tap disabled by macOS (timeout or user input)
+    if type_ == Quartz.kCGEventTapDisabledByTimeout:
+        logging.warning("Event tap disabled by macOS timeout — re-enabling")
+        if _event_tap is not None:
+            Quartz.CGEventTapEnable(_event_tap, True)
+        return event
+    if type_ == Quartz.kCGEventTapDisabledByUserInput:
+        logging.info("Event tap disabled by user input — re-enabling")
+        if _event_tap is not None:
+            Quartz.CGEventTapEnable(_event_tap, True)
+        return event
+
     keycode = Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode)
     flags = Quartz.CGEventGetFlags(event)
 
@@ -41,29 +75,27 @@ def tap_callback(proxy, type_, event, refcon):
         if cmd_pressed and APPEND_BULLET_FILE:
             _set_append_target(APPEND_BULLET_FILE)
             logging.info("Cmd+F1 detected: append-to-file mode activated.")
-            show_notification("Dictation", "Recording for TODO append...")
-            _toggle_recording()
+            _dispatch(_toggle_recording)
         elif alt_pressed and APPEND_BULLET_FILE_2:
             _set_append_target(APPEND_BULLET_FILE_2)
             logging.info("Alt+F1 detected: append to secondary TODO file.")
-            show_notification("Dictation", "Recording for secondary TODO...")
-            _toggle_recording()
+            _dispatch(_toggle_recording)
         elif shift_pressed:
             _set_auto_enter(True)
             logging.info("Shift+F1 detected: auto-enter mode activated.")
-            _toggle_recording()
+            _dispatch(_toggle_recording)
         else:
             logging.info("F1 key detected.")
-            _toggle_recording()
+            _dispatch(_toggle_recording)
         return None
 
     # F2 key => Repaste last transcription
     if keycode == 120:  # F2
         logging.info("F2 key detected.")
-        _repaste_last_transcription()
+        _dispatch(_repaste_last_transcription)
         return None
 
-    # Option+Shift+D => Quit
+    # Option+Shift+D => Quit (runs inline — fast, no risk of blocking)
     if type_ == Quartz.kCGEventKeyDown and keycode == 2:  # 'D'
         shift_pressed = (flags & Quartz.kCGEventFlagMaskShift) == Quartz.kCGEventFlagMaskShift
         option_pressed = (flags & Quartz.kCGEventFlagMaskAlternate) == Quartz.kCGEventFlagMaskAlternate
@@ -73,7 +105,7 @@ def tap_callback(proxy, type_, event, refcon):
             cleanup_lock_file()
             os._exit(0)
 
-    # Cmd+Alt+R => Force restart (kill and relaunch)
+    # Cmd+Alt+R => Force restart (runs inline — must complete before exit)
     if type_ == Quartz.kCGEventKeyDown and keycode == 15:  # 'R'
         cmd_pressed = (flags & Quartz.kCGEventFlagMaskCommand) == Quartz.kCGEventFlagMaskCommand
         alt_pressed = (flags & Quartz.kCGEventFlagMaskAlternate) == Quartz.kCGEventFlagMaskAlternate
@@ -107,6 +139,8 @@ def tap_callback(proxy, type_, event, refcon):
 
 
 def run_event_tap():
+    global _event_tap
+
     event_mask = Quartz.CGEventMaskBit(Quartz.kCGEventKeyDown)
     tap = Quartz.CGEventTapCreate(
         Quartz.kCGSessionEventTap,
@@ -121,12 +155,30 @@ def run_event_tap():
         event_tap_failed.set()
         return
 
+    _event_tap = tap
+
     run_loop_source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
+    run_loop = Quartz.CFRunLoopGetCurrent()
     Quartz.CFRunLoopAddSource(
-        Quartz.CFRunLoopGetCurrent(),
+        run_loop,
         run_loop_source,
         Quartz.kCFRunLoopCommonModes
     )
+
+    # Add a 30s repeating timer to update the heartbeat, proving this thread is alive.
+    # This fires even when no keys are pressed, so the watchdog can distinguish
+    # "user idle" from "tap thread frozen".
+    timer = Quartz.CFRunLoopTimerCreate(
+        None,                           # allocator
+        Quartz.CFAbsoluteTimeGetCurrent() + 30,  # first fire
+        30.0,                           # interval (seconds)
+        0,                              # flags
+        0,                              # order
+        _tap_heartbeat_timer_callback,  # callback
+        None                            # context
+    )
+    Quartz.CFRunLoopAddTimer(run_loop, timer, Quartz.kCFRunLoopCommonModes)
+
     Quartz.CGEventTapEnable(tap, True)
     logging.info("Event tap started successfully.")
     event_tap_ready.set()

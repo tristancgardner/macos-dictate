@@ -14,6 +14,8 @@ from process import show_notification
 from audio import audio_queue, state_lock
 from text_postprocessor import cleanup_text, send_text_to_active_app
 
+
+
 # Transcription state
 transcribing = False
 transcribe_start = None

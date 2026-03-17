@@ -1,7 +1,9 @@
 """Watchdog monitor for audio stream health and device changes."""
 
+import os
+import sys
 import logging
-import threading
+import subprocess
 import time
 import random
 import traceback
@@ -9,7 +11,7 @@ import queue
 import sounddevice as sd
 from datetime import datetime
 
-from process import show_notification
+from process import show_notification, cleanup_lock_file
 from audio import (
     audio_queue, stream_lock, state_lock,
     audio_callback, select_input_device, test_microphone_access,
@@ -26,6 +28,10 @@ MAX_STALL_RETRIES = 3
 audio_timeout = 5
 last_polled_device_name = None
 watchdog_active = True
+
+# Event tap thread heartbeat timeout — the tap thread updates its heartbeat every 30s
+# via a CFRunLoop timer. If this exceeds the timeout, the thread itself is dead/frozen.
+EVENT_TAP_TIMEOUT = 120  # 2 minutes without a timer tick = thread is dead
 
 # Set by dictate.py
 _get_device_arg = None
@@ -96,7 +102,17 @@ def watchdog_monitor():
                         transcription.append_target = None
                     show_notification("Dictation Error", "Transcription timed out, ready for new recording")
 
-            elif not is_recording and not is_transcribing:
+            # Check event tap heartbeat — timer in the tap thread updates this every 30s.
+            # If it stops updating, the tap thread is dead/frozen (not just idle).
+            import keyboard as keyboard_mod_ref
+            with keyboard_mod_ref.tap_heartbeat_lock:
+                tap_age = (datetime.now() - keyboard_mod_ref.tap_heartbeat).total_seconds()
+            if tap_age > EVENT_TAP_TIMEOUT:
+                logging.error(f"Event tap thread unresponsive for {tap_age:.0f}s — auto-restarting app")
+                show_notification("Dictation", "Event tap frozen, restarting...")
+                _force_restart()
+
+            if not is_recording and not is_transcribing:
                 stream_is_none = False
                 with stream_lock:
                     stream_is_none = (audio.stream is None)
@@ -134,6 +150,29 @@ def watchdog_monitor():
             logging.error(f"Watchdog error: {e}")
             logging.error(traceback.format_exc())
             time.sleep(5)
+
+
+def _force_restart():
+    """Force-restart the app by spawning a new instance and exiting."""
+    try:
+        current_path = os.path.abspath(sys.executable)
+        if '.app/Contents/' in current_path:
+            bundle_path = current_path.split('.app/Contents/')[0] + '.app'
+            logging.info(f"Watchdog relaunching .app bundle: {bundle_path}")
+            subprocess.Popen(['open', '-n', bundle_path],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+        else:
+            script_path = os.path.abspath(sys.modules['__main__'].__file__)
+            logging.info(f"Watchdog relaunching Python script: {script_path}")
+            subprocess.Popen([sys.executable, script_path],
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+        time.sleep(0.5)
+    except Exception as e:
+        logging.error(f"Watchdog failed to relaunch: {e}")
+    cleanup_lock_file()
+    os._exit(1)
 
 
 def restart_audio_stream():
