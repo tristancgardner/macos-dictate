@@ -10,6 +10,7 @@ SIMPLE_MAPPINGS = {
     r'\bcolon\b': ':',
     r'\bColin\b': ':',
     r'\bslash\b': '/',
+    r'\bclock code\b': 'Claude Code',
 }
 
 COMPLEX_MAPPINGS = {
