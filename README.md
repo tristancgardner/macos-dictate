@@ -122,6 +122,18 @@ APPEND_BULLET_FILE_2=/path/to/your/secondary_todo.md
 
 Both variables are optional. If not set, the corresponding shortcut falls through to plain F1 behavior.
 
+### 6. Grant macOS Permissions
+
+Before running, you must grant permissions in **System Settings > Privacy & Security**. Add your terminal app (Terminal, iTerm2, Warp, etc.) to each of these:
+
+1. **Accessibility** — required for the keyboard event tap to intercept shortcuts (F1, F2, etc.)
+2. **Input Monitoring** — also required for the keyboard event tap to function
+3. **Microphone** — macOS will prompt on first launch; click Allow
+
+Without Accessibility + Input Monitoring, hotkeys won't fire. Without Microphone, no audio is recorded.
+
+> **If you build the `.app` bundle** (see [App Packaging](#app-packaging-optional) below), grant these permissions to `Dictate.app` instead of your terminal. The `.app` gets its own TCC identity so permissions persist across reboots.
+
 ---
 
 ## Running the Script
