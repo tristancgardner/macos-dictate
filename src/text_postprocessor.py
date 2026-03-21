@@ -11,6 +11,7 @@ SIMPLE_MAPPINGS = {
     r'\bColin\b': ':',
     r'\bslash\b': '/',
     r'\bclock code\b': 'Claude Code',
+    r'\barena\b': 'Eraina',
 }
 
 COMPLEX_MAPPINGS = {
