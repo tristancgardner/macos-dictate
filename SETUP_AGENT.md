@@ -20,6 +20,16 @@ Run the app with:
 ./venv/bin/python src/dictate.py --model small
 ```
 
+## macOS Permissions
+
+The app requires three permissions in **System Settings > Privacy & Security**. Grant these to your terminal app (or `Dictate.app` if running the packaged bundle):
+
+1. **Accessibility** — keyboard event tap for intercepting shortcuts (F1, F2, etc.)
+2. **Input Monitoring** — also required for the keyboard event tap
+3. **Microphone** — prompted on first launch
+
+Without Accessibility + Input Monitoring, hotkeys won't fire. Without Microphone, no audio is recorded.
+
 ## Project Structure
 
 | File | Purpose |

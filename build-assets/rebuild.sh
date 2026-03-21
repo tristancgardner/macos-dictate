@@ -10,7 +10,7 @@ SCRIPT_DIR="$(dirname "$0")"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-PYTHON="/Users/tristangardner/.pyenv/versions/3.12.7/envs/venv/bin/python"
+PYTHON="$PROJECT_ROOT/venv/bin/python"
 BUNDLE_ID="com.suorastudios.dictate"
 APP="dist/Dictate.app"
 
