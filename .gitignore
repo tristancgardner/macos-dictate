@@ -49,11 +49,6 @@ yarn-error.log*
 *.tmp
 .temp/
 # SpecWeave
-.specweave/cache/
-.specweave/increments/*/logs/
-.specweave/increments/*/test-results/
-.specweave/docs-site-internal/
+.specweave/
 .claude-plugin/
 plugins/
-.specweave/state/
-.specweave/logs/
