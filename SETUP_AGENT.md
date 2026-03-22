@@ -30,6 +30,8 @@ The app requires three permissions in **System Settings > Privacy & Security**. 
 
 Without Accessibility + Input Monitoring, hotkeys won't fire. Without Microphone, no audio is recorded.
 
+4. **Notifications** — uses `osascript` for status notifications. On a fresh macOS install, run `osascript -e 'display notification "test" with title "test"'` once in Terminal (or from Script Editor.app) to trigger the macOS permission prompt. Without this, notifications silently fail.
+
 ## Project Structure
 
 | File | Purpose |
