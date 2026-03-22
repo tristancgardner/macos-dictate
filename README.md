@@ -132,6 +132,12 @@ Before running, you must grant permissions in **System Settings > Privacy & Secu
 
 Without Accessibility + Input Monitoring, hotkeys won't fire. Without Microphone, no audio is recorded.
 
+4. **Notifications** — the app uses `osascript` to show status notifications (recording started, transcription complete, errors). On a fresh macOS install, notifications won't appear until you trigger them once. Run this in Terminal:
+   ```bash
+   osascript -e 'display notification "test" with title "test"'
+   ```
+   If no notification appears, open **Script Editor.app** (in `/Applications/Utilities/`), run `display notification "hello" with title "hello"` from within it, and click **Allow** when macOS prompts. Script Editor will then appear in **System Settings > Notifications** where you can confirm it's enabled.
+
 > **If you build the `.app` bundle** (see [App Packaging](#app-packaging-optional) below), grant these permissions to `Dictate.app` instead of your terminal. The `.app` gets its own TCC identity so permissions persist across reboots.
 
 ---
@@ -194,7 +200,22 @@ This will:
 open dist/Dictate.app
 ```
 
-Or drag `dist/Dictate.app` to your Applications folder and add it as a Login Item in **System Settings > General > Login Items**.
+### Optional: Start at Login & Add to Dock
+
+To launch Dictate automatically when you log in:
+
+```bash
+osascript -e 'tell application "System Events" to make login item at end with properties {path:"/path/to/macos-dictate/dist/Dictate.app", hidden:false}'
+```
+
+To add Dictate to your Dock:
+
+```bash
+defaults write com.apple.dock persistent-apps -array-add '<dict><key>tile-data</key><dict><key>file-data</key><dict><key>_CFURLString</key><string>/path/to/macos-dictate/dist/Dictate.app</string><key>_CFURLStringType</key><integer>0</integer></dict></dict></dict>'
+killall Dock
+```
+
+Replace `/path/to/macos-dictate/` with the actual path to your clone.
 
 ---
 
