@@ -15,6 +15,7 @@ mappings.local.json
 # Dev notes and plans (kept locally)
 notes/
 plans/
+PROGRESS.md
 # Obsolete scripts (superseded by Dictate.app + Cmd+Alt+R)
 start-dictate.command
 restart-dictate.command

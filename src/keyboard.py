@@ -35,6 +35,11 @@ _repaste_last_transcription = None
 _get_append_target = None
 _set_append_target = None
 _set_auto_enter = None
+_handle_correct_this = None
+
+# Double-trigger guard: True while a Correct This invocation is running.
+# Force-released after 90 s so a stuck claude invocation cannot permanently lock the feature.
+_correct_this_in_flight = False
 
 
 def _dispatch(fn, *args):
@@ -93,6 +98,18 @@ def tap_callback(proxy, type_, event, refcon):
     if keycode == 120:  # F2
         logging.info("F2 key detected.")
         _dispatch(_repaste_last_transcription)
+        return None
+
+    # F6 key => "Correct This" — capture selection and add to mappings.local.json
+    if keycode == 97:  # F6
+        logging.info("F6 key detected: Correct This.")
+        global _correct_this_in_flight
+        if _correct_this_in_flight:
+            logging.warning("F6: already in flight — ignoring duplicate press.")
+            return None
+        if _handle_correct_this is not None:
+            _correct_this_in_flight = True
+            _dispatch(_handle_correct_this)
         return None
 
     # Option+Shift+D => Quit (runs inline — fast, no risk of blocking)

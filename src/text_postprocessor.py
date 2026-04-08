@@ -26,6 +26,20 @@ if _LOCAL_MAPPINGS_PATH.exists():
     with open(_LOCAL_MAPPINGS_PATH, encoding='utf-8') as f:
         SIMPLE_MAPPINGS.update(json.load(f))
 
+def reload_local_mappings():
+    """Re-read mappings.local.json and merge into SIMPLE_MAPPINGS (thread-safe via GIL for dict update)."""
+    if not _LOCAL_MAPPINGS_PATH.exists():
+        return
+    try:
+        with open(_LOCAL_MAPPINGS_PATH, encoding='utf-8') as f:
+            new_entries = json.load(f)
+        SIMPLE_MAPPINGS.update(new_entries)
+        import logging
+        logging.info(f"reload_local_mappings: loaded {len(new_entries)} entries from {_LOCAL_MAPPINGS_PATH}")
+    except Exception as e:
+        import logging
+        logging.error(f"reload_local_mappings: failed to reload — {e}")
+
 # Trigger phrases that cause the following words to be wrapped in quotes
 # Each entry: (trigger regex, whether to keep the trigger phrase in output)
 QUOTE_TRIGGERS = [

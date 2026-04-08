@@ -213,12 +213,143 @@ def toggle_recording():
 def _set_append_target(path):
     transcription.append_target = path
 
+def handle_correct_this():
+    """
+    F6 handler: capture selected text via clipboard, prompt user for correction,
+    update mappings.local.json directly, reload mappings, notify.
+
+    Double-trigger guard: keyboard._correct_this_in_flight is set True by the
+    keyboard handler before calling this. This function MUST always release it
+    before returning (normal path or error path).
+    """
+    import json
+    import re
+    import subprocess
+    import time
+    import threading
+    import logging
+    import keyboard as keyboard_mod
+    from text_postprocessor import _deferred_clipboard_restore, reload_local_mappings
+
+    MAPPINGS_PATH = project_root / 'mappings.local.json'
+    CORRECTION_LOG = project_root / 'notes' / '___correction_log.md'
+
+    def _release_lock():
+        keyboard_mod._correct_this_in_flight = False
+
+    # --- Step A: Save current clipboard ---
+    try:
+        old_clip = subprocess.check_output(['pbpaste'])
+    except subprocess.CalledProcessError:
+        old_clip = b''
+
+    # --- Step B: Simulate Cmd+C to capture selection ---
+    os.system("osascript -e 'tell application \"System Events\" to keystroke \"c\" using {command down}'")
+    time.sleep(0.3)
+
+    # --- Step C: Read the selected text ---
+    try:
+        selected = subprocess.check_output(['pbpaste']).decode('utf-8').strip()
+    except subprocess.CalledProcessError:
+        selected = ''
+
+    # --- Step D: Restore original clipboard on a background thread after 1.0 s ---
+    threading.Thread(
+        target=_deferred_clipboard_restore,
+        args=(old_clip,),
+        daemon=True
+    ).start()
+
+    if not selected:
+        show_notification("Dictate: Correct This", "No text selected — select text first, then press F6.")
+        logging.info("F6: no selected text found.")
+        _release_lock()
+        return
+
+    # --- Step E: Prompt user for correction via native dialog ---
+    escaped_selected = selected.replace('"', '\\"').replace("'", "'\\''")
+    dialog_script = (
+        f'tell application "System Events"\n'
+        f'    activate\n'
+        f'    set result to display dialog "Correct \\"{escaped_selected}\\" to:" '
+        f'default answer "" buttons {{"Cancel", "Save"}} default button "Save"\n'
+        f'    return text returned of result\n'
+        f'end tell'
+    )
+    try:
+        correction = subprocess.check_output(
+            ['osascript', '-e', dialog_script],
+            stderr=subprocess.DEVNULL
+        ).decode('utf-8').strip()
+    except subprocess.CalledProcessError:
+        logging.info("F6: user cancelled correction dialog.")
+        _release_lock()
+        return
+
+    if not correction:
+        show_notification("Dictate: Correct This", "No correction entered — cancelled.")
+        _release_lock()
+        return
+
+    logging.info(f"F6: selected='{selected}', correction='{correction}'")
+
+    # --- Step F: Update mappings.local.json directly ---
+    pattern = f"\\b{re.escape(selected)}\\b"
+    try:
+        if MAPPINGS_PATH.exists():
+            with open(MAPPINGS_PATH, encoding='utf-8') as f:
+                mappings = json.load(f)
+        else:
+            mappings = {}
+
+        if pattern in mappings:
+            show_notification("Dictate: Correct This", f"Already mapped: '{selected}'")
+            logging.info(f"F6: pattern {pattern!r} already exists, skipping.")
+            _release_lock()
+            return
+
+        mappings[pattern] = correction
+
+        with open(MAPPINGS_PATH, 'w', encoding='utf-8') as f:
+            json.dump(mappings, f, indent=4, ensure_ascii=False)
+            f.write('\n')
+
+        logging.info(f"F6: wrote mapping {pattern!r} -> {correction!r}")
+    except Exception as e:
+        show_notification("Dictate: Correct This", f"Failed to write mapping: {e}")
+        logging.error(f"F6: failed to update mappings.local.json: {e}")
+        _release_lock()
+        return
+
+    # --- Step G: Reload mappings in running process ---
+    try:
+        reload_local_mappings()
+        logging.info("F6: mappings reloaded successfully.")
+    except Exception as e:
+        logging.error(f"F6: failed to reload mappings: {e}")
+
+    # --- Step H: Append to correction log (creates file if absent) ---
+    try:
+        CORRECTION_LOG.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with open(CORRECTION_LOG, 'a', encoding='utf-8') as f:
+            f.write(f"- [{timestamp}] `{selected}` → `{correction}`\n")
+        logging.info(f"F6: logged correction to {CORRECTION_LOG}")
+    except Exception as e:
+        logging.error(f"F6: failed to write correction log: {e}")
+
+    # --- Step I: Success notification ---
+    show_notification("Dictate: Correct This", f"Saved: '{selected}' → '{correction}'")
+
+    _release_lock()
+
 keyboard_mod.APPEND_BULLET_FILE = APPEND_BULLET_FILE
 keyboard_mod.APPEND_BULLET_FILE_2 = APPEND_BULLET_FILE_2
 keyboard_mod._toggle_recording = toggle_recording
 keyboard_mod._repaste_last_transcription = transcription.repaste_last_transcription
 keyboard_mod._set_append_target = _set_append_target
 keyboard_mod._set_auto_enter = lambda v: setattr(transcription, 'auto_enter', v)
+keyboard_mod._handle_correct_this = handle_correct_this
 
 transcription.APPEND_BULLET_FILE = APPEND_BULLET_FILE
 
