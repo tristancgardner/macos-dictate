@@ -6,6 +6,7 @@ dist/
 __pycache__/
 
 # Personal config
+AGENTS.md
 CLAUDE.md
 .claude/
 .env.local
