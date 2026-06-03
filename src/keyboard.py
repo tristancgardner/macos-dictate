@@ -94,11 +94,13 @@ def tap_callback(proxy, type_, event, refcon):
             _dispatch(_toggle_recording)
         return None
 
-    # F2 key => Repaste last transcription
+    # Cmd+F2 => Repaste last transcription
     if keycode == 120:  # F2
-        logging.info("F2 key detected.")
-        _dispatch(_repaste_last_transcription)
-        return None
+        cmd_pressed = (flags & Quartz.kCGEventFlagMaskCommand) == Quartz.kCGEventFlagMaskCommand
+        if cmd_pressed:
+            logging.info("Cmd+F2 detected.")
+            _dispatch(_repaste_last_transcription)
+            return None
 
     # F6 key => "Correct This" — capture selection and add to mappings.local.json
     if keycode == 97:  # F6
